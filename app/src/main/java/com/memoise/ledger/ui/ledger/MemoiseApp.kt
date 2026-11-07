@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.TimePickerDialog
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -107,6 +109,7 @@ private const val TIMELINE_ROUTE = "timeline"
 private const val UNSCHEDULED_ROUTE = "unscheduled"
 private const val OVERDUE_ROUTE = "overdue"
 private const val SEARCH_ROUTE = "search"
+private const val SETTINGS_ROUTE = "settings"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
 private const val RELATED_CAPTURE_ROUTE =
@@ -123,6 +126,20 @@ private enum class PrimaryDestination(val route: String, val label: String, val 
 fun MemoiseApp(viewModel: EntryViewModel) {
     val entries by viewModel.entries.collectAsState()
     val navController = rememberNavController()
+    val context = LocalContext.current
+    val exportDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.exportJson(uri) { success ->
+                Toast.makeText(
+                    context,
+                    if (success) "JSON export saved" else "Could not save the export",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showPrimaryNavigation = currentRoute in setOf(
@@ -181,12 +198,14 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                 TimelineScreen(
                     entries = entries.filter { it.scheduledDate != null },
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
             composable(UNSCHEDULED_ROUTE) {
                 UnscheduledScreen(
                     entries = entries.filter { it.scheduledDate == null },
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
             composable(OVERDUE_ROUTE) {
@@ -199,6 +218,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                             entry.status != EntryStatus.CANCELLED
                     }.sortedByDescending { it.scheduledDate },
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
             composable(SEARCH_ROUTE) {
@@ -206,6 +226,15 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     entries = entries,
                     search = viewModel::searchEntries,
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
+                )
+            }
+            composable(SETTINGS_ROUTE) {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onExportJson = {
+                        exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
+                    },
                 )
             }
             composable(
@@ -374,6 +403,7 @@ private sealed interface TimelineItem {
 private fun TimelineScreen(
     entries: List<LedgerEntry>,
     onOpenEntry: (LedgerEntry) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val today = LocalDate.now()
     val grouped = remember(entries) {
@@ -406,11 +436,14 @@ private fun TimelineScreen(
             title = "Memoise",
             subtitle = "PERSONAL LEDGER",
             trailing = {
-                TextButton(
-                    onClick = {
-                        if (todayIndex >= 0) listState.requestScrollToItem(todayIndex)
-                    },
-                ) { Text("Today") }
+                Row {
+                    TextButton(
+                        onClick = {
+                            if (todayIndex >= 0) listState.requestScrollToItem(todayIndex)
+                        },
+                    ) { Text("Today") }
+                    TextButton(onClick = onOpenSettings) { Text("Settings") }
+                }
             },
         )
         if (items.isEmpty()) {
@@ -444,11 +477,13 @@ private fun TimelineScreen(
 private fun UnscheduledScreen(
     entries: List<LedgerEntry>,
     onOpenEntry: (LedgerEntry) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         LedgerHeader(
             title = "Unscheduled",
             subtitle = "Things to place in time, when you're ready.",
+            trailing = { TextButton(onClick = onOpenSettings) { Text("Settings") } },
         )
         if (entries.isEmpty()) {
             EmptyLedgerState(
@@ -470,11 +505,13 @@ private fun UnscheduledScreen(
 private fun OverdueScreen(
     entries: List<LedgerEntry>,
     onOpenEntry: (LedgerEntry) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         LedgerHeader(
             title = "Overdue",
             subtitle = "Unfinished obligations, kept in their original place.",
+            trailing = { TextButton(onClick = onOpenSettings) { Text("Settings") } },
         )
         if (entries.isEmpty()) {
             EmptyLedgerState(
@@ -518,6 +555,7 @@ private fun SearchScreen(
         SearchRelationshipFilter,
     ) -> Flow<List<LedgerSearchMatch>>,
     onOpenEntry: (LedgerEntry) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var statusLabel by rememberSaveable { mutableStateOf("Any status") }
@@ -586,6 +624,7 @@ private fun SearchScreen(
         LedgerHeader(
             title = "Search",
             subtitle = "Find a detail anywhere in your ledger.",
+            trailing = { TextButton(onClick = onOpenSettings) { Text("Settings") } },
         )
         OutlinedTextField(
             value = query,
@@ -788,6 +827,34 @@ private fun SearchDateField(
             dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } },
         ) {
             DatePicker(state = pickerState)
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    onBack: () -> Unit,
+    onExportJson: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        LedgerHeader(
+            title = "Settings",
+            subtitle = "Your ledger stays on this device.",
+            trailing = { TextButton(onClick = onBack) { Text("Back") } },
+        )
+        Box(Modifier.padding(start = 26.dp, top = 12.dp)) {
+            SectionLabel("BACKUP AND RESTORE")
+        }
+        Text(
+            "Save a portable copy of your entries and their details. Choose a local folder or an available drive in the next step.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = onExportJson,
+            modifier = Modifier.padding(start = 26.dp, top = 8.dp),
+        ) {
+            Text("Export JSON")
         }
     }
 }

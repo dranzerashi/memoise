@@ -1,5 +1,7 @@
 package com.memoise.ledger.ui.ledger
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.memoise.ledger.data.repository.EntryRepository
@@ -20,19 +22,24 @@ import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class EntryViewModel @Inject constructor(
     private val repository: EntryRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
     val entries: StateFlow<List<LedgerEntry>> = repository.observeEntries().stateIn(
         scope = viewModelScope,
@@ -49,6 +56,25 @@ class EntryViewModel @Inject constructor(
         dateTo: LocalDate?,
         relationshipFilter: SearchRelationshipFilter,
     ) = repository.searchEntries(query, status, type, dateFilter, dateFrom, dateTo, relationshipFilter)
+
+    fun exportJson(destination: Uri, onFinished: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val saved = try {
+                val json = repository.exportJson()
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(destination, "wt")
+                        ?: error("Could not open the selected file")
+                    output.bufferedWriter(Charsets.UTF_8).use { it.write(json) }
+                }
+                true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            onFinished(saved)
+        }
+    }
 
     fun create(title: String, scheduledDate: LocalDate?) {
         val entry = newEntry(title, scheduledDate) ?: return

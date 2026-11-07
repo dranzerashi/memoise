@@ -44,10 +44,17 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.time.Instant
+import java.time.ZoneOffset
+import java.security.MessageDigest
+import java.util.Locale
+import com.memoise.ledger.BuildConfig
 import org.json.JSONObject
+import org.json.JSONArray
 
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
+    suspend fun exportJson(): String
     fun searchEntries(
         query: String,
         status: EntryStatus?,
@@ -114,6 +121,133 @@ class RoomEntryRepository @Inject constructor(
     private val recurrenceDao: RecurrenceSeriesDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
+    override suspend fun exportJson(): String = database.withTransaction {
+        val backupDao = database.ledgerBackupDao()
+        val data = JSONObject()
+        data.put("entries", JSONArray().apply {
+            backupDao.entries().forEach { entry ->
+                put(JSONObject().apply {
+                    put("id", entry.id)
+                    put("title", entry.title)
+                    putNullable("type", entry.type?.name)
+                    put("status", entry.status.name)
+                    putNullable("scheduledDate", entry.scheduledDate?.toString())
+                    putNullable("scheduledTime", entry.scheduledTime?.toString())
+                    putNullable("descriptiveEndDate", entry.descriptiveEndDate?.toString())
+                    put("datePurpose", entry.datePurpose.name)
+                    put("createdAt", entry.createdAt)
+                    put("updatedAt", entry.updatedAt)
+                    putNullable("completedAt", entry.completedAt)
+                    putNullable("recurrenceSeriesId", entry.recurrenceSeriesId)
+                    putNullable("sourceEntryId", entry.sourceEntryId)
+                    putNullable("sourceContentId", entry.sourceContentId)
+                })
+            }
+        })
+        data.put("relationships", JSONArray().apply {
+            backupDao.relationships().forEach { relationship ->
+                put(JSONObject().apply {
+                    put("id", relationship.id)
+                    put("sourceEntryId", relationship.sourceEntryId)
+                    put("targetEntryId", relationship.targetEntryId)
+                    put("type", relationship.relationshipType.name)
+                    put("createdAt", relationship.createdAt)
+                })
+            }
+        })
+        data.put("descriptionBlocks", JSONArray().apply {
+            backupDao.descriptionBlocks().forEach { block ->
+                put(JSONObject().apply {
+                    put("id", block.id)
+                    put("entryId", block.entryId)
+                    put("content", block.content)
+                    put("sortOrder", block.sortOrder)
+                    put("createdAt", block.createdAt)
+                    put("updatedAt", block.updatedAt)
+                })
+            }
+        })
+        data.put("checklistItems", JSONArray().apply {
+            backupDao.checklistItems().forEach { item ->
+                put(JSONObject().apply {
+                    put("id", item.id)
+                    put("entryId", item.entryId)
+                    put("title", item.title)
+                    put("completed", item.completed)
+                    put("sortOrder", item.sortOrder)
+                    putNullable("linkedEntryId", item.linkedEntryId)
+                    put("createdAt", item.createdAt)
+                    put("updatedAt", item.updatedAt)
+                })
+            }
+        })
+        data.put("notes", JSONArray().apply {
+            backupDao.notes().forEach { note ->
+                put(JSONObject().apply {
+                    put("id", note.id)
+                    put("entryId", note.entryId)
+                    put("content", note.content)
+                    put("createdAt", note.createdAt)
+                    put("updatedAt", note.updatedAt)
+                })
+            }
+        })
+        data.put("activityHistory", JSONArray().apply {
+            backupDao.activities().forEach { activity ->
+                put(JSONObject().apply {
+                    put("id", activity.id)
+                    put("entryId", activity.entryId)
+                    put("action", activity.action)
+                    putNullable("details", activity.details)
+                    put("occurredAt", activity.occurredAt)
+                })
+            }
+        })
+        data.put("reminders", JSONArray().apply {
+            backupDao.reminders().forEach { reminder ->
+                put(JSONObject().apply {
+                    put("id", reminder.id)
+                    put("entryId", reminder.entryId)
+                    put("triggerAt", reminder.triggerAt)
+                    put("enabled", reminder.enabled)
+                    putNullable("relativeOffsetDays", reminder.relativeOffsetDays)
+                    putNullable("relativeMinuteOfDay", reminder.relativeMinuteOfDay)
+                    putNullable("parentReminderId", reminder.parentReminderId)
+                    put("createdAt", reminder.createdAt)
+                    put("updatedAt", reminder.updatedAt)
+                })
+            }
+        })
+        data.put("recurrenceSeries", JSONArray().apply {
+            backupDao.recurrenceSeries().forEach { series ->
+                put(JSONObject().apply {
+                    put("id", series.id)
+                    put("rule", JSONObject(series.ruleJson))
+                    put("startsOn", LocalDate.ofEpochDay(series.startsOn).toString())
+                    putNullable("endsOn", series.endsOn?.let { LocalDate.ofEpochDay(it).toString() })
+                    put("timeZoneId", series.timeZoneId)
+                    put("active", series.active)
+                    put("createdAt", series.createdAt)
+                    put("updatedAt", series.updatedAt)
+                })
+            }
+        })
+
+        val dataText = data.toString()
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(dataText.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it) }
+        val manifest = JSONObject()
+            .put("format", "memoise-personal-ledger")
+            .put("backupSchemaVersion", 1)
+            .put("applicationId", BuildConfig.APPLICATION_ID)
+            .put("applicationVersion", BuildConfig.VERSION_NAME)
+            .put("databaseSchemaVersion", database.openHelper.readableDatabase.version)
+            .put("exportedAt", Instant.now().toString())
+            .put("integrity", JSONObject().put("algorithm", "SHA-256").put("digest", digest))
+        JSONObject().put("manifest", manifest).put("data", data).toString(2)
+    }
+
     override fun searchEntries(
         query: String,
         status: EntryStatus?,
@@ -857,6 +991,10 @@ private fun LedgerEntry.toEntity() = EntryEntity(
     sourceEntryId = sourceEntryId,
     sourceContentId = sourceContentId,
 )
+
+private fun JSONObject.putNullable(name: String, value: Any?) {
+    put(name, value ?: JSONObject.NULL)
+}
 
 private fun EntryRelationshipEntity.toDomain() = LedgerRelationship(
     id = id,

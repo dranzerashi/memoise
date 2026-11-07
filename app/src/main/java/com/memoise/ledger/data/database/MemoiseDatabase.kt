@@ -32,6 +32,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryReminderDao(): EntryReminderDao
     abstract fun recurrenceSeriesDao(): RecurrenceSeriesDao
     abstract fun entrySearchDao(): EntrySearchDao
+    abstract fun ledgerBackupDao(): LedgerBackupDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {

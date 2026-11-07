@@ -128,3 +128,8 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Search filters
 
 - Added selectable date ranges and filters for entries with or without links.
+
+## 2026-11-07 — Versioned JSON export
+
+- Added a Settings action that exports a transactionally consistent snapshot of entries, links, descriptions, checklists, notes, history, reminders, and recurrence rules through Android’s document picker.
+- The portable JSON includes app/database versions, a backup format version, and a SHA-256 integrity digest. The debug build is ready for Pixel verification.
