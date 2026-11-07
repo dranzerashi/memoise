@@ -38,7 +38,7 @@ interface EntryRepository {
         parentId: String,
         type: RelationshipType,
         entry: LedgerEntry,
-        sourceChecklistItemId: String? = null,
+        sourceChecklistItemIds: List<String> = emptyList(),
     )
     suspend fun addChecklistItem(entryId: String, title: String)
     suspend fun updateChecklistItem(item: LedgerChecklistItem)
@@ -112,18 +112,19 @@ class RoomEntryRepository @Inject constructor(
         parentId: String,
         type: RelationshipType,
         entry: LedgerEntry,
-        sourceChecklistItemId: String?,
+        sourceChecklistItemIds: List<String>,
     ) {
         require(parentId != entry.id) { "An entry cannot be related to itself." }
         database.withTransaction {
             check(entryDao.findId(parentId) != null) { "The source entry no longer exists." }
-            val sourceChecklistItem = sourceChecklistItemId?.let { id ->
+            val sourceChecklistItems = mutableListOf<EntryChecklistEntity>()
+            for (id in sourceChecklistItemIds.distinct()) {
                 val item = checklistDao.findById(id)
                 check(item != null && item.entryId == parentId) {
                     "The source checklist item no longer exists."
                 }
                 check(item.linkedEntryId == null) { "This checklist item already has a linked entry." }
-                item
+                sourceChecklistItems += item
             }
             if (type != RelationshipType.RELATED) ensureNoCycle(parentId, entry.id)
             entryDao.upsert(entry.toEntity())
@@ -136,17 +137,20 @@ class RoomEntryRepository @Inject constructor(
                     createdAt = System.currentTimeMillis(),
                 ),
             )
-            if (sourceChecklistItem != null) {
-                checklistDao.upsert(
-                    sourceChecklistItem.copy(
-                        linkedEntryId = entry.id,
-                        updatedAt = System.currentTimeMillis(),
-                    ),
-                )
+            if (sourceChecklistItems.isNotEmpty()) {
+                val linkedAt = System.currentTimeMillis()
+                sourceChecklistItems.forEach { item ->
+                    checklistDao.upsert(
+                        item.copy(
+                            linkedEntryId = entry.id,
+                            updatedAt = linkedAt,
+                        ),
+                    )
+                }
                 recordActivity(
                     parentId,
-                    "Checklist item linked",
-                    "${sourceChecklistItem.title} → ${entry.title}",
+                    if (sourceChecklistItems.size == 1) "Checklist item linked" else "Checklist items linked",
+                    "${sourceChecklistItems.joinToString { it.title }} → ${entry.title}",
                 )
             }
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)

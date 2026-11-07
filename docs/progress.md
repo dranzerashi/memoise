@@ -66,3 +66,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Checklist item conversion
 
 - Long-pressing a checklist item can create a preparation or follow-up with the item title prefilled. The original item retains a single link to the generated entry, and both records are saved with the relationship in one transaction.
+
+## 2026-11-07 — Multi-item checklist conversion
+
+- Checklist selection mode can convert multiple items into one preparation or follow-up. Each selected item keeps its own link to that shared entry; creation and linking are transactional.

@@ -89,7 +89,7 @@ private const val OVERDUE_ROUTE = "overdue"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
 private const val RELATED_CAPTURE_ROUTE =
-    "related-capture/{parentId}/{relationshipType}?sourceContentId={sourceContentId}&sourceChecklistItemId={sourceChecklistItemId}"
+    "related-capture/{parentId}/{relationshipType}?sourceContentId={sourceContentId}&sourceChecklistItemIds={sourceChecklistItemIds}"
 
 private enum class PrimaryDestination(val route: String, val label: String, val glyph: String) {
     TIMELINE(TIMELINE_ROUTE, "Timeline", "◷"),
@@ -220,9 +220,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                                 "related-capture/${entry.id}/${type.name}?sourceContentId=${block.id}",
                             )
                         },
-                        onConvertChecklistItem = { type, item ->
+                        onConvertChecklistItems = { type, items ->
                             navController.navigate(
-                                "related-capture/${entry.id}/${type.name}?sourceChecklistItemId=${item.id}",
+                                "related-capture/${entry.id}/${type.name}?sourceChecklistItemIds=${items.joinToString(",") { it.id }}",
                             )
                         },
                         onDelete = {
@@ -257,7 +257,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         nullable = true
                         defaultValue = null
                     },
-                    navArgument("sourceChecklistItemId") {
+                    navArgument("sourceChecklistItemIds") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
@@ -268,7 +268,10 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                 val type = routeEntry.arguments?.getString("relationshipType")
                     ?.let { value -> runCatching { RelationshipType.valueOf(value) }.getOrNull() }
                 val sourceContentId = routeEntry.arguments?.getString("sourceContentId")
-                val sourceChecklistItemId = routeEntry.arguments?.getString("sourceChecklistItemId")
+                val sourceChecklistItemIds = routeEntry.arguments?.getString("sourceChecklistItemIds")
+                    ?.split(',')
+                    ?.filter(String::isNotBlank)
+                    .orEmpty()
                 val parent = entries.firstOrNull { it.id == parentId }
                 if (parent == null || type == null) {
                     MissingEntryScreen(onBack = { navController.popBackStack() })
@@ -280,11 +283,11 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     val checklist by remember(parent.id) {
                         viewModel.checklistFor(parent.id)
                     }.collectAsState(initial = emptyList())
-                    val sourceChecklistItem = checklist.firstOrNull { it.id == sourceChecklistItemId }
+                    val sourceChecklistItems = checklist.filter { it.id in sourceChecklistItemIds }
                     CaptureScreen(
                         heading = type.creationLabel(),
                         contextLabel = "For ${parent.title}",
-                        initialTitle = sourceBlock?.content ?: sourceChecklistItem?.title.orEmpty(),
+                        initialTitle = sourceBlock?.content ?: sourceChecklistItems.joinToString(", ") { it.title },
                         onCancel = { navController.popBackStack() },
                         onSave = { title, date ->
                             viewModel.createRelated(
@@ -293,7 +296,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                                 title,
                                 date,
                                 sourceContentId,
-                                sourceChecklistItemId,
+                                sourceChecklistItemIds,
                             )
                             navController.popBackStack()
                         },
@@ -777,7 +780,7 @@ private fun EntryDetailScreen(
     onUpdateDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onDeleteDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onConvertDescriptionBlock: (RelationshipType, LedgerDescriptionBlock) -> Unit,
-    onConvertChecklistItem: (RelationshipType, LedgerChecklistItem) -> Unit,
+    onConvertChecklistItems: (RelationshipType, List<LedgerChecklistItem>) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -885,7 +888,7 @@ private fun EntryDetailScreen(
                     onAdd = onAddChecklistItem,
                     onUpdate = onUpdateChecklistItem,
                     onDelete = onDeleteChecklistItem,
-                    onConvert = onConvertChecklistItem,
+                    onConvert = { type, items -> onConvertChecklistItems(type, items) },
                     onOpenEntry = onOpenEntry,
                 )
                 Spacer(Modifier.height(32.dp))
@@ -1176,11 +1179,46 @@ private fun ChecklistSection(
     onAdd: (String, String) -> Unit,
     onUpdate: (LedgerChecklistItem) -> Unit,
     onDelete: (LedgerChecklistItem) -> Unit,
-    onConvert: (RelationshipType, LedgerChecklistItem) -> Unit,
+    onConvert: (RelationshipType, List<LedgerChecklistItem>) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var draft by rememberSaveable(entryId) { mutableStateOf("") }
+    var selectionMode by rememberSaveable(entryId) { mutableStateOf(false) }
+    var selectedItemIds by remember(entryId) { mutableStateOf(emptySet<String>()) }
+    val selectedItems = items.filter { it.id in selectedItemIds && it.linkedEntryId == null }
     Column {
+        if (selectionMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "${selectedItems.size} selected",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = {
+                    selectedItemIds = emptySet()
+                    selectionMode = false
+                }) { Text("Cancel") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(
+                    onClick = { onConvert(RelationshipType.PREPARATION, selectedItems) },
+                    enabled = selectedItems.isNotEmpty(),
+                ) { Text("Create preparation") }
+                TextButton(
+                    onClick = { onConvert(RelationshipType.FOLLOW_UP, selectedItems) },
+                    enabled = selectedItems.isNotEmpty(),
+                ) { Text("Create follow-up") }
+            }
+        }
         if (items.isEmpty()) {
             Text(
                 text = "No checklist items yet",
@@ -1193,32 +1231,51 @@ private fun ChecklistSection(
                 ChecklistRow(
                     item = item,
                     linkedEntry = entries.firstOrNull { it.id == item.linkedEntryId },
+                    selectionMode = selectionMode,
+                    selected = item.id in selectedItemIds,
                     onUpdate = onUpdate,
                     onDelete = onDelete,
-                    onConvert = onConvert,
+                    onStartSelection = {
+                        if (item.linkedEntryId == null) {
+                            selectionMode = true
+                            selectedItemIds = setOf(item.id)
+                        }
+                    },
+                    onToggleSelection = {
+                        if (item.linkedEntryId == null) {
+                            selectedItemIds = if (item.id in selectedItemIds) {
+                                selectedItemIds - item.id
+                            } else {
+                                selectedItemIds + item.id
+                            }
+                        }
+                    },
+                    onConvert = { type, selected -> onConvert(type, listOf(selected)) },
                     onOpenEntry = onOpenEntry,
                 )
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Add an action") },
-            )
-            TextButton(
-                onClick = {
-                    onAdd(entryId, draft)
-                    draft = ""
-                },
-                enabled = draft.isNotBlank(),
-                modifier = Modifier.padding(start = 5.dp),
-            ) { Text("Add") }
+        if (!selectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    placeholder = { Text("Add an action") },
+                )
+                TextButton(
+                    onClick = {
+                        onAdd(entryId, draft)
+                        draft = ""
+                    },
+                    enabled = draft.isNotBlank(),
+                    modifier = Modifier.padding(start = 5.dp),
+                ) { Text("Add") }
+            }
         }
     }
 }
@@ -1227,8 +1284,12 @@ private fun ChecklistSection(
 private fun ChecklistRow(
     item: LedgerChecklistItem,
     linkedEntry: LedgerEntry?,
+    selectionMode: Boolean,
+    selected: Boolean,
     onUpdate: (LedgerChecklistItem) -> Unit,
     onDelete: (LedgerChecklistItem) -> Unit,
+    onStartSelection: () -> Unit,
+    onToggleSelection: () -> Unit,
     onConvert: (RelationshipType, LedgerChecklistItem) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
 ) {
@@ -1241,16 +1302,21 @@ private fun ChecklistRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(
-                checked = item.completed,
-                onCheckedChange = { onUpdate(item.copy(completed = it)) },
+                checked = if (selectionMode) selected else item.completed,
+                enabled = !selectionMode || item.linkedEntryId == null,
+                onCheckedChange = {
+                    if (selectionMode) onToggleSelection() else onUpdate(item.copy(completed = it))
+                },
             )
             Text(
                 text = item.title,
                 modifier = Modifier
                     .weight(1f)
                     .combinedClickable(
-                        onClick = {},
-                        onLongClick = { menuExpanded = true },
+                        onClick = { if (selectionMode) onToggleSelection() },
+                        onLongClick = {
+                            if (selectionMode) onToggleSelection() else menuExpanded = true
+                        },
                     ),
                 style = MaterialTheme.typography.bodyMedium.copy(
                     textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None,
@@ -1258,48 +1324,57 @@ private fun ChecklistRow(
                 color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant
                 else MaterialTheme.colorScheme.onSurface,
             )
-            Box {
-                TextButton(onClick = { menuExpanded = true }) { Text("•••") }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    if (linkedEntry == null) {
+            if (!selectionMode) {
+                Box {
+                    TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        if (linkedEntry == null) {
+                            DropdownMenuItem(
+                                text = { Text("Create preparation") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onConvert(RelationshipType.PREPARATION, item)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Create follow-up") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onConvert(RelationshipType.FOLLOW_UP, item)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Select multiple") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onStartSelection()
+                                },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Open linked entry") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenEntry(linkedEntry)
+                                },
+                            )
+                        }
                         DropdownMenuItem(
-                            text = { Text("Create preparation") },
+                            text = { Text("Edit") },
                             onClick = {
                                 menuExpanded = false
-                                onConvert(RelationshipType.PREPARATION, item)
+                                editTitle = item.title
+                                editDialogVisible = true
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Create follow-up") },
+                            text = { Text("Delete") },
                             onClick = {
                                 menuExpanded = false
-                                onConvert(RelationshipType.FOLLOW_UP, item)
-                            },
-                        )
-                    } else {
-                        DropdownMenuItem(
-                            text = { Text("Open linked entry") },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenEntry(linkedEntry)
+                                onDelete(item)
                             },
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        onClick = {
-                            menuExpanded = false
-                            editTitle = item.title
-                            editDialogVisible = true
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete(item)
-                        },
-                    )
                 }
             }
         }
