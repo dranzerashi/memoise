@@ -27,6 +27,7 @@ enum class RelationshipType {
     PREPARATION,
     FOLLOW_UP,
     RELATED,
+    RECURRENCE,
 }
 
 data class LedgerRelationship(

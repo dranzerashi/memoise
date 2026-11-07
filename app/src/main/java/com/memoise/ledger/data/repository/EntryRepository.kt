@@ -512,8 +512,41 @@ class RoomEntryRepository @Inject constructor(
     }
 
     override suspend fun delete(id: String) {
-        reminderDao.allForEntry(id).forEach { reminderScheduler.cancel(it.id) }
-        entryDao.deleteById(id)
+        val reminders = reminderDao.allForEntry(id)
+        database.withTransaction {
+            val entry = entryDao.findById(id) ?: return@withTransaction
+            val seriesId = entry.recurrenceSeriesId
+            val series = if (seriesId == null) null else recurrenceDao.findById(seriesId)
+            val members = if (series == null) emptyList() else entryDao.findByRecurrenceSeries(series.id)
+            val isSource = series != null && members.minByOrNull { it.createdAt }?.id == id
+            val replacementSource = if (isSource) members
+                .filterNot { it.id == id }
+                .minByOrNull { it.createdAt } else null
+            entryDao.deleteById(id)
+            if (series != null && isSource) {
+                reminders.forEach { parentReminder ->
+                    reminderDao.childrenOf(parentReminder.id).forEach { inherited ->
+                        reminderDao.upsert(inherited.copy(parentReminderId = null))
+                    }
+                }
+                if (replacementSource == null) {
+                    recurrenceDao.upsert(series.copy(active = false, updatedAt = System.currentTimeMillis()))
+                } else {
+                    members.filterNot { it.id == id || it.id == replacementSource.id }.forEach { occurrence ->
+                        relationshipDao.insert(
+                            EntryRelationshipEntity(
+                                id = java.util.UUID.randomUUID().toString(),
+                                sourceEntryId = replacementSource.id,
+                                targetEntryId = occurrence.id,
+                                relationshipType = RelationshipType.RECURRENCE,
+                                createdAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        reminders.forEach { reminderScheduler.cancel(it.id) }
     }
 
     private suspend fun refreshEnabledReminders(entry: LedgerEntry) {
@@ -606,8 +639,8 @@ class RoomEntryRepository @Inject constructor(
 
     private suspend fun isActiveRecurrenceTemplate(entry: EntryEntity): Boolean {
         val seriesId = entry.recurrenceSeriesId ?: return false
-        if (recurrenceDao.findById(seriesId)?.active != true) return false
-        return entryDao.findByRecurrenceSeries(seriesId)
+        val series = recurrenceDao.findById(seriesId) ?: return false
+        return series.active && entryDao.findByRecurrenceSeries(seriesId)
             .minByOrNull { it.createdAt }
             ?.id == entry.id
     }
@@ -684,7 +717,18 @@ class RoomEntryRepository @Inject constructor(
         }
         if (additions.isNotEmpty()) {
             database.withTransaction {
-                additions.forEach { entryDao.upsert(it) }
+                additions.forEach { occurrence ->
+                    entryDao.upsert(occurrence)
+                    relationshipDao.insert(
+                        EntryRelationshipEntity(
+                            id = java.util.UUID.randomUUID().toString(),
+                            sourceEntryId = template.id,
+                            targetEntryId = occurrence.id,
+                            relationshipType = RelationshipType.RECURRENCE,
+                            createdAt = now,
+                        ),
+                    )
+                }
                 reminderAdditions.forEach { reminderDao.upsert(it) }
             }
             reminderAdditions.filter { it.enabled && it.triggerAt > System.currentTimeMillis() }
@@ -880,9 +924,9 @@ private fun EntryActivityEntity.toDomain() = LedgerActivity(
 )
 
 private fun EntryStatus.displayName(): String = when (this) {
-    EntryStatus.PENDING -> "Pending"
+    EntryStatus.PENDING -> "Not started"
     EntryStatus.IN_PROGRESS -> "In progress"
-    EntryStatus.COMPLETED -> "Completed"
+    EntryStatus.COMPLETED -> "Done"
     EntryStatus.CANCELLED -> "Cancelled"
 }
 
@@ -890,6 +934,7 @@ private fun RelationshipType.activityLabel(): String = when (this) {
     RelationshipType.PREPARATION -> "Preparation"
     RelationshipType.FOLLOW_UP -> "Follow-up"
     RelationshipType.RELATED -> "Related entry"
+    RelationshipType.RECURRENCE -> "Recurring occurrence"
 }
 
 private fun String.activityPreview(): String =

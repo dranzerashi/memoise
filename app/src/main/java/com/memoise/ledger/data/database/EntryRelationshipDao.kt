@@ -16,7 +16,7 @@ interface EntryRelationshipDao {
 
     @Query(
         "SELECT targetEntryId FROM entry_relationships " +
-            "WHERE sourceEntryId = :entryId AND relationshipType IN ('PREPARATION', 'FOLLOW_UP')",
+            "WHERE sourceEntryId = :entryId AND relationshipType IN ('PREPARATION', 'FOLLOW_UP', 'RECURRENCE')",
     )
     suspend fun directedChildren(entryId: String): List<String>
 

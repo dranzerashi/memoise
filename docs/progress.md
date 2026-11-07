@@ -101,3 +101,17 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Recurrence and reminder verification
 
 - The user verified that recurrence and inherited reminder patterns work on the Pixel.
+
+## 2026-11-07 — Recurrence source navigation
+
+- Added a source-entry link from each occurrence’s detail screen and recorded current recurrence/reminder behavior in `docs/features.md` for later migration into in-app Help.
+- Source links use the existing entry relationship graph. Existing recurrence occurrences are connected during migration from schema version 9 to 10.
+
+## 2026-11-07 — Plain-language UI labels
+
+- Applied the approved wording pass to entry status, date meaning, next steps, recurrence, reminder state, history, and relationship sections. Added confirmation before ending future repeats; existing entries remain.
+- Named the flexible task date “Planned date” to distinguish it from an event or a due date.
+
+## 2026-11-07 — Date-purpose wording
+
+- Changed the date-purpose choices to “Event”, “Due by”, and “Maybe on”.

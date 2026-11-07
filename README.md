@@ -24,6 +24,7 @@ Open the project directory in Android Studio and run the `app` configuration, or
 
 ## Documentation
 
+- [Current feature behavior](docs/features.md)
 - [Product requirements and technical specification](docs/product-requirements.md)
 - [UI/UX design and screen layout specification](docs/ui-ux-specification.md)
 - [Append-only progress log](docs/progress.md)

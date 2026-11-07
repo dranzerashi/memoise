@@ -17,7 +17,7 @@ import androidx.room.TypeConverters
         EntryReminderEntity::class,
         RecurrenceSeriesEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -185,6 +185,26 @@ abstract class MemoiseDatabase : RoomDatabase() {
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `entry_reminders` ADD COLUMN `parentReminderId` TEXT")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """INSERT INTO `entry_relationships`
+                        (`id`, `sourceEntryId`, `targetEntryId`, `relationshipType`, `createdAt`)
+                        SELECT lower(hex(randomblob(16))), parent.`id`, child.`id`, 'RECURRENCE', child.`createdAt`
+                        FROM `ledger_entries` AS child
+                        JOIN `ledger_entries` AS parent
+                          ON parent.`recurrenceSeriesId` = child.`recurrenceSeriesId`
+                        WHERE child.`recurrenceSeriesId` IS NOT NULL
+                          AND parent.`id` = (
+                            SELECT candidate.`id` FROM `ledger_entries` AS candidate
+                            WHERE candidate.`recurrenceSeriesId` = child.`recurrenceSeriesId`
+                            ORDER BY candidate.`createdAt` ASC, candidate.`id` ASC LIMIT 1
+                          )
+                          AND parent.`id` <> child.`id`""".trimIndent(),
+                )
             }
         }
     }

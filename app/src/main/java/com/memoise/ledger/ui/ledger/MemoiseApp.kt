@@ -633,7 +633,7 @@ private fun LedgerEntryRow(
             val supportingText = when {
                 overdue -> entry.scheduledDate?.let { overdueLabel(it) }
                 entry.status == EntryStatus.IN_PROGRESS -> "In progress"
-                entry.status == EntryStatus.COMPLETED -> "Completed"
+                entry.status == EntryStatus.COMPLETED -> "Done"
                 entry.status == EntryStatus.CANCELLED -> "Cancelled"
                 else -> null
             }
@@ -835,13 +835,17 @@ private fun EntryDetailScreen(
 ) {
     var title by rememberSaveable(entry.id) { mutableStateOf(entry.title) }
     var showDeleteConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
-    val isRecurrenceTemplate = remember(entries, entry.recurrenceSeriesId, entry.id) {
-        val seriesId = entry.recurrenceSeriesId
-        seriesId != null && entries
-            .filter { it.recurrenceSeriesId == seriesId }
-            .minByOrNull { it.createdAt }
-            ?.id == entry.id
+    val recurrenceSourceId = remember(entries, relationships, entry.recurrenceSeriesId) {
+        relationships.firstOrNull {
+            it.type == RelationshipType.RECURRENCE && it.targetEntryId == entry.id
+        }?.sourceEntryId ?: entry.recurrenceSeriesId?.let { seriesId ->
+            entries.filter { it.recurrenceSeriesId == seriesId }.minByOrNull { it.createdAt }?.id
+        }
     }
+    val recurrenceSource = remember(entries, recurrenceSourceId) {
+        entries.firstOrNull { it.id == recurrenceSourceId }
+    }
+    val isRecurrenceTemplate = recurrenceSourceId == entry.id
     val allowPastRelativeReminder = recurrence?.active == true && isRecurrenceTemplate
     LaunchedEffect(entry.title) {
         if (title.isNotBlank()) title = entry.title
@@ -913,7 +917,7 @@ private fun EntryDetailScreen(
                 )
                 if (entry.scheduledDate != null) {
                     Spacer(Modifier.height(18.dp))
-                    SectionLabel("DATE PURPOSE")
+                    SectionLabel("WHAT THIS DATE MEANS")
                     EntryDropdown(
                         selected = entry.datePurpose.displayName(),
                         options = DatePurpose.entries.associateBy { it.displayName() },
@@ -927,9 +931,24 @@ private fun EntryDetailScreen(
                 RecurrenceSection(
                     entry = entry,
                     recurrence = recurrence,
+                    sourceEntry = recurrenceSource,
                     onCreate = { frequency -> onCreateRecurrence(entry.id, frequency) },
                     onStop = { onStopRecurrence(entry.id) },
+                    onOpenSource = onOpenEntry,
                 )
+                if (entry.recurrenceSeriesId != null && isRecurrenceTemplate) {
+                    Spacer(Modifier.height(18.dp))
+                    RelationshipSection(
+                        title = "REPEATED ENTRIES",
+                        relationType = RelationshipType.RECURRENCE,
+                        entry = entry,
+                        entries = entries,
+                        relationships = relationships,
+                        onAdd = {},
+                        onOpen = onOpenEntry,
+                        showAdd = false,
+                    )
+                }
                 Spacer(Modifier.height(22.dp))
                 DescriptionSection(
                     entryId = entry.id,
@@ -942,7 +961,7 @@ private fun EntryDetailScreen(
                     onOpenEntry = onOpenEntry,
                 )
                 Spacer(Modifier.height(22.dp))
-                SectionLabel("ACTIONS")
+                SectionLabel("NEXT STEPS")
                 ChecklistSection(
                     entryId = entry.id,
                     items = checklist,
@@ -1025,12 +1044,14 @@ private fun EntryDetailScreen(
                     onOpen = onOpenEntry,
                 )
                 val incoming = relationships.filter {
-                    it.targetEntryId == entry.id && it.type != RelationshipType.RELATED
+                    it.targetEntryId == entry.id &&
+                        it.type != RelationshipType.RELATED &&
+                        it.type != RelationshipType.RECURRENCE
                 }
                 if (incoming.isNotEmpty()) {
                     Spacer(Modifier.height(20.dp))
                     RelationshipListSection(
-                        title = "CONNECTED FROM",
+                        title = "ALSO LINKED FROM",
                         links = incoming,
                         entry = entry,
                         entries = entries,
@@ -1303,7 +1324,7 @@ private fun ChecklistSection(
         }
         if (items.isEmpty()) {
             Text(
-                text = "No checklist items yet",
+                text = "No steps yet",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
@@ -1347,7 +1368,7 @@ private fun ChecklistSection(
                     onValueChange = { draft = it },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    placeholder = { Text("Add an action") },
+                    placeholder = { Text("Add a step") },
                 )
                 TextButton(
                     onClick = {
@@ -1735,19 +1756,36 @@ private fun ReminderSection(
 private fun RecurrenceSection(
     entry: LedgerEntry,
     recurrence: LedgerRecurrenceSeries?,
+    sourceEntry: LedgerEntry?,
     onCreate: (RecurrenceFrequency) -> Unit,
     onStop: () -> Unit,
+    onOpenSource: (LedgerEntry) -> Unit,
 ) {
     var expanded by remember(entry.id) { mutableStateOf(false) }
+    var showStopConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
     Column {
         SectionLabel("REPEAT")
+        if (sourceEntry != null && sourceEntry.id != entry.id) {
+            TextButton(
+                onClick = { onOpenSource(sourceEntry) },
+                modifier = Modifier.padding(start = 0.dp),
+            ) {
+                Text("↖ First entry: ${sourceEntry.title}")
+            }
+        } else if (entry.recurrenceSeriesId != null && sourceEntry == null) {
+            Text(
+                text = "The first entry is no longer in your ledger.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (recurrence == null) {
             Box {
                 TextButton(
                     onClick = { expanded = true },
                     enabled = entry.scheduledDate != null,
                     modifier = Modifier.padding(start = 0.dp),
-                ) { Text("Choose frequency") }
+                ) { Text("Choose how often") }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     RecurrenceFrequency.entries.forEach { frequency ->
                         DropdownMenuItem(
@@ -1769,22 +1807,52 @@ private fun RecurrenceSection(
             }
         } else {
             Text(
-                text = "${recurrence.frequency.label} · ${if (recurrence.active) "Repeating" else "Stopped"}",
+                text = if (recurrence.active) {
+                    "Repeats ${when (recurrence.frequency) {
+                        RecurrenceFrequency.DAILY -> "every day"
+                        RecurrenceFrequency.WEEKLY -> "every week"
+                        RecurrenceFrequency.MONTHLY -> "every month"
+                        RecurrenceFrequency.YEARLY -> "every year"
+                    }}"
+                } else {
+                    "No longer repeats"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (recurrence.active) {
                 Text(
-                    text = "Future entries are created through ${formatDate(LocalDate.now().plusMonths(12))}.",
+                    text = "More entries will be added over time. Showing through ${formatDate(LocalDate.now().plusMonths(12))}.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 3.dp),
                 )
-                TextButton(onClick = onStop, modifier = Modifier.align(Alignment.End)) {
-                    Text("Stop repeating")
+                TextButton(
+                    onClick = { showStopConfirmation = true },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Stop future repeats")
                 }
             }
         }
+    }
+    if (showStopConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showStopConfirmation = false },
+            title = { Text("Stop future repeats?") },
+            text = { Text("Entries already created will stay in your ledger. No more will be added.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showStopConfirmation = false
+                        onStop()
+                    },
+                ) { Text("Stop future repeats") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStopConfirmation = false }) { Text("Keep repeating") }
+            },
+        )
     }
 }
 
@@ -1820,7 +1888,7 @@ private fun ReminderRow(
             Text(
                 text = when {
                     reminder.enabled -> "Approximate reminder"
-                    hasPassed -> "Sent or missed"
+                    hasPassed -> "Reminder time passed"
                     else -> "Off"
                 },
                 style = MaterialTheme.typography.labelSmall,
@@ -2019,7 +2087,7 @@ private fun ReminderEditorDialog(
 @Composable
 private fun ActivityHistory(activities: List<LedgerActivity>) {
     Column {
-        SectionLabel("ACTIVITY HISTORY")
+        SectionLabel("HISTORY")
         if (activities.isEmpty()) {
             Text(
                 text = "No activity recorded yet",
@@ -2062,6 +2130,7 @@ private fun RelationshipSection(
     relationships: List<LedgerRelationship>,
     onAdd: () -> Unit,
     onOpen: (LedgerEntry) -> Unit,
+    showAdd: Boolean = true,
 ) {
     val children = relationships.asSequence()
         .filter {
@@ -2089,8 +2158,10 @@ private fun RelationshipSection(
                 RelationshipRow(entry = child, onClick = { onOpen(child) })
             }
         }
-        TextButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 0.dp)) {
-            Text("+ Add ${relationType.creationLabel().lowercase()}")
+        if (showAdd) {
+            TextButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                Text("+ Add ${relationType.creationLabel().lowercase()}")
+            }
         }
     }
 }
@@ -2140,7 +2211,7 @@ private fun RelationshipRow(
             )
             val details = buildList {
                 entry.scheduledDate?.let { add(formatDate(it)) }
-                if (entry.status == EntryStatus.COMPLETED) add("Completed")
+                if (entry.status == EntryStatus.COMPLETED) add("Done")
                 if (entry.status == EntryStatus.IN_PROGRESS) add("In progress")
                 if (entry.status == EntryStatus.CANCELLED) add("Cancelled")
             }.joinToString(" · ")
@@ -2268,20 +2339,21 @@ private fun overdueLabel(date: LocalDate): String {
 }
 
 private fun EntryStatus.displayName(): String = when (this) {
-    EntryStatus.PENDING -> "Pending"
+    EntryStatus.PENDING -> "Not started"
     EntryStatus.IN_PROGRESS -> "In progress"
-    EntryStatus.COMPLETED -> "Completed"
+    EntryStatus.COMPLETED -> "Done"
     EntryStatus.CANCELLED -> "Cancelled"
 }
 
 private fun DatePurpose.displayName(): String = when (this) {
     DatePurpose.EVENT -> "Event"
-    DatePurpose.DEADLINE -> "Deadline"
-    DatePurpose.FLEXIBLE_TASK -> "Flexible task date"
+    DatePurpose.DEADLINE -> "Due by"
+    DatePurpose.FLEXIBLE_TASK -> "Maybe on"
 }
 
 private fun RelationshipType.creationLabel(): String = when (this) {
     RelationshipType.PREPARATION -> "Preparation"
     RelationshipType.FOLLOW_UP -> "Follow-up"
     RelationshipType.RELATED -> "Related entry"
+    RelationshipType.RECURRENCE -> "Occurrence"
 }

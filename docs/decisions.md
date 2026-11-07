@@ -17,3 +17,7 @@ Store each occurrence as an independent ledger entry and generate dates through 
 ## D-004 — Recurring reminder inheritance
 
 Apply the parent’s reminder timing pattern to future occurrences. Keep each occurrence’s reminders independently editable.
+
+## D-005 — Recurrence source links
+
+Represent source-to-occurrence links in the existing entry relationship graph using the recurrence relationship type.
