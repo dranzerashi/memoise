@@ -9,6 +9,8 @@ import com.memoise.ledger.data.database.EntryDescriptionBlockDao
 import com.memoise.ledger.data.database.EntryDescriptionBlockEntity
 import com.memoise.ledger.data.database.EntryNoteDao
 import com.memoise.ledger.data.database.EntryNoteEntity
+import com.memoise.ledger.data.database.EntryReminderDao
+import com.memoise.ledger.data.database.EntryReminderEntity
 import com.memoise.ledger.data.database.EntryEntity
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.EntryRelationshipEntity
@@ -18,9 +20,11 @@ import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
+import com.memoise.ledger.domain.model.LedgerReminder
 import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.RelationshipType
+import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import androidx.room.withTransaction
@@ -35,6 +39,7 @@ interface EntryRepository {
     fun observeActivities(entryId: String): Flow<List<LedgerActivity>>
     fun observeDescriptionBlocks(entryId: String): Flow<List<LedgerDescriptionBlock>>
     fun observeNotes(entryId: String): Flow<List<LedgerNote>>
+    fun observeReminders(entryId: String): Flow<List<LedgerReminder>>
     suspend fun create(entry: LedgerEntry)
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
@@ -53,6 +58,10 @@ interface EntryRepository {
     suspend fun addNote(entryId: String, content: String)
     suspend fun updateNote(note: LedgerNote)
     suspend fun deleteNote(noteId: String)
+    suspend fun addReminder(entryId: String, triggerAt: Long)
+    suspend fun updateReminder(reminder: LedgerReminder, triggerAt: Long)
+    suspend fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean)
+    suspend fun deleteReminder(reminderId: String)
     suspend fun delete(id: String)
 }
 
@@ -65,6 +74,8 @@ class RoomEntryRepository @Inject constructor(
     private val activityDao: EntryActivityDao,
     private val descriptionBlockDao: EntryDescriptionBlockDao,
     private val noteDao: EntryNoteDao,
+    private val reminderDao: EntryReminderDao,
+    private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
     override fun observeEntries(): Flow<List<LedgerEntry>> =
         entryDao.observeAll().map { entries -> entries.map(EntryEntity::toDomain) }
@@ -88,6 +99,9 @@ class RoomEntryRepository @Inject constructor(
     override fun observeNotes(entryId: String): Flow<List<LedgerNote>> =
         noteDao.observeForEntry(entryId).map { notes -> notes.map(EntryNoteEntity::toDomain) }
 
+    override fun observeReminders(entryId: String): Flow<List<LedgerReminder>> =
+        reminderDao.observeForEntry(entryId).map { reminders -> reminders.map(EntryReminderEntity::toDomain) }
+
     override suspend fun create(entry: LedgerEntry) {
         database.withTransaction {
             entryDao.upsert(entry.toEntity())
@@ -97,6 +111,7 @@ class RoomEntryRepository @Inject constructor(
 
     override suspend fun save(entry: LedgerEntry) {
         entryDao.upsert(entry.toEntity())
+        refreshEnabledReminders(entry)
     }
 
     override suspend fun setStatus(entry: LedgerEntry, status: EntryStatus) {
@@ -117,6 +132,12 @@ class RoomEntryRepository @Inject constructor(
                 now,
             )
         }
+        refreshEnabledReminders(
+            entry.copy(
+                status = status,
+                completedAt = if (status == EntryStatus.COMPLETED) now else null,
+            ),
+        )
     }
 
     override suspend fun createRelated(
@@ -302,8 +323,97 @@ class RoomEntryRepository @Inject constructor(
         }
     }
 
+    override suspend fun addReminder(entryId: String, triggerAt: Long) {
+        require(triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
+        val entry = entryDao.findById(entryId) ?: return
+        check(entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
+            "Completed or cancelled entries cannot have active reminders."
+        }
+        val now = System.currentTimeMillis()
+        val reminder = EntryReminderEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            entryId = entryId,
+            triggerAt = triggerAt,
+            enabled = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        database.withTransaction {
+            reminderDao.upsert(reminder)
+            recordActivity(entryId, "Reminder added", formatReminderTime(triggerAt), now)
+        }
+        reminderScheduler.schedule(reminder.id, triggerAt)
+    }
+
+    override suspend fun updateReminder(reminder: LedgerReminder, triggerAt: Long) {
+        require(triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
+        val now = System.currentTimeMillis()
+        val updated = database.withTransaction {
+            val existing = reminderDao.findById(reminder.id) ?: return@withTransaction null
+            check(existing.entryId == reminder.entryId) { "The reminder belongs to another entry." }
+            val entry = entryDao.findById(existing.entryId)
+            check(entry != null && entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
+                "Completed or cancelled entries cannot have active reminders."
+            }
+            val replacement = existing.copy(triggerAt = triggerAt, enabled = true, updatedAt = now)
+            reminderDao.upsert(replacement)
+            recordActivity(reminder.entryId, "Reminder changed", formatReminderTime(triggerAt), now)
+            replacement
+        } ?: return
+        reminderScheduler.schedule(updated.id, updated.triggerAt)
+    }
+
+    override suspend fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean) {
+        val now = System.currentTimeMillis()
+        val updated = database.withTransaction {
+            val existing = reminderDao.findById(reminder.id) ?: return@withTransaction null
+            check(existing.entryId == reminder.entryId) { "The reminder belongs to another entry." }
+            if (enabled) {
+                require(existing.triggerAt > now) { "This reminder time has passed." }
+                val entry = entryDao.findById(existing.entryId)
+                check(entry != null && entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
+                    "Completed or cancelled entries cannot have active reminders."
+                }
+            }
+            val replacement = existing.copy(enabled = enabled, updatedAt = now)
+            reminderDao.upsert(replacement)
+            recordActivity(
+                reminder.entryId,
+                if (enabled) "Reminder enabled" else "Reminder disabled",
+                formatReminderTime(existing.triggerAt),
+                now,
+            )
+            replacement
+        } ?: return
+        if (updated.enabled) reminderScheduler.schedule(updated.id, updated.triggerAt)
+        else reminderScheduler.cancel(updated.id)
+    }
+
+    override suspend fun deleteReminder(reminderId: String) {
+        database.withTransaction {
+            val existing = reminderDao.findById(reminderId) ?: return@withTransaction
+            reminderDao.deleteById(reminderId)
+            recordActivity(existing.entryId, "Reminder removed", formatReminderTime(existing.triggerAt))
+        }
+        reminderScheduler.cancel(reminderId)
+    }
+
     override suspend fun delete(id: String) {
+        reminderDao.allForEntry(id).forEach { reminderScheduler.cancel(it.id) }
         entryDao.deleteById(id)
+    }
+
+    private suspend fun refreshEnabledReminders(entry: LedgerEntry) {
+        val reminders = reminderDao.enabledForEntry(entry.id)
+        if (entry.status == EntryStatus.COMPLETED || entry.status == EntryStatus.CANCELLED) {
+            val now = System.currentTimeMillis()
+            database.withTransaction {
+                reminders.forEach { reminderDao.upsert(it.copy(enabled = false, updatedAt = now)) }
+            }
+            reminders.forEach { reminderScheduler.cancel(it.id) }
+        } else {
+            reminders.forEach { reminderScheduler.schedule(it.id, it.triggerAt) }
+        }
     }
 
     private suspend fun ensureNoCycle(parentId: String, childId: String) {
@@ -407,6 +517,15 @@ private fun EntryNoteEntity.toDomain() = LedgerNote(
     updatedAt = updatedAt,
 )
 
+private fun EntryReminderEntity.toDomain() = LedgerReminder(
+    id = id,
+    entryId = entryId,
+    triggerAt = triggerAt,
+    enabled = enabled,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
 private fun LedgerChecklistItem.toEntity() = EntryChecklistEntity(
     id = id,
     entryId = entryId,
@@ -435,6 +554,15 @@ private fun LedgerNote.toEntity() = EntryNoteEntity(
     updatedAt = updatedAt,
 )
 
+private fun LedgerReminder.toEntity() = EntryReminderEntity(
+    id = id,
+    entryId = entryId,
+    triggerAt = triggerAt,
+    enabled = enabled,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
 private fun EntryActivityEntity.toDomain() = LedgerActivity(
     id = id,
     entryId = entryId,
@@ -458,3 +586,8 @@ private fun RelationshipType.activityLabel(): String = when (this) {
 
 private fun String.activityPreview(): String =
     if (length <= 80) this else "${take(80)}…"
+
+private fun formatReminderTime(epochMillis: Long): String =
+    java.time.Instant.ofEpochMilli(epochMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d 'at' h:mm a"))

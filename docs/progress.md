@@ -75,3 +75,9 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 
 - Added separate timestamped notes with add, edit, and remove actions, plus activity history entries for note changes.
 - Added the `entry_notes` Room table and non-destructive migration from schema version 4 to 5.
+
+## 2026-11-07 — Custom date/time reminders
+
+- Added timestamped reminders with add, edit, enable/disable, and remove actions. Notifications use WorkManager and are approximate; completed or cancelled entries stop active reminders.
+- Added the `entry_reminders` Room table and non-destructive migration from schema version 5 to 6.
+- Delivery issue reported: reminders appear only while Memoise is open or in the background. Investigate on the Pixel when device access is available.

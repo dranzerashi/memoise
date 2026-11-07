@@ -14,8 +14,9 @@ import androidx.room.TypeConverters
         EntryActivityEntity::class,
         EntryDescriptionBlockEntity::class,
         EntryNoteEntity::class,
+        EntryReminderEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -26,6 +27,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryActivityDao(): EntryActivityDao
     abstract fun entryDescriptionBlockDao(): EntryDescriptionBlockDao
     abstract fun entryNoteDao(): EntryNoteDao
+    abstract fun entryReminderDao(): EntryReminderDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -129,6 +131,26 @@ abstract class MemoiseDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_entry_notes_entryId_createdAt` ON `entry_notes` (`entryId`, `createdAt`)",
+                )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `entry_reminders` (
+                        `id` TEXT NOT NULL,
+                        `entryId` TEXT NOT NULL,
+                        `triggerAt` INTEGER NOT NULL,
+                        `enabled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`entryId`) REFERENCES `ledger_entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_entry_reminders_entryId_triggerAt` ON `entry_reminders` (`entryId`, `triggerAt`)",
                 )
             }
         }

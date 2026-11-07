@@ -20,6 +20,9 @@ interface EntryDao {
     @Query("SELECT id FROM ledger_entries WHERE id = :id LIMIT 1")
     suspend fun findId(id: String): String?
 
+    @Query("SELECT * FROM ledger_entries WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): EntryEntity?
+
     @Upsert
     suspend fun upsert(entry: EntryEntity)
 

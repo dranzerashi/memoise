@@ -10,6 +10,7 @@ import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
+import com.memoise.ledger.domain.model.LedgerReminder
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +62,7 @@ class EntryViewModel @Inject constructor(
     fun activitiesFor(entryId: String) = repository.observeActivities(entryId)
     fun descriptionBlocksFor(entryId: String) = repository.observeDescriptionBlocks(entryId)
     fun notesFor(entryId: String) = repository.observeNotes(entryId)
+    fun remindersFor(entryId: String) = repository.observeReminders(entryId)
 
     fun addChecklistItem(entryId: String, title: String) {
         viewModelScope.launch { repository.addChecklistItem(entryId, title) }
@@ -96,6 +98,22 @@ class EntryViewModel @Inject constructor(
 
     fun deleteNote(note: LedgerNote) {
         viewModelScope.launch { repository.deleteNote(note.id) }
+    }
+
+    fun addReminder(entryId: String, triggerAt: Long) {
+        viewModelScope.launch { repository.addReminder(entryId, triggerAt) }
+    }
+
+    fun updateReminder(reminder: LedgerReminder, triggerAt: Long) {
+        viewModelScope.launch { repository.updateReminder(reminder, triggerAt) }
+    }
+
+    fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean) {
+        viewModelScope.launch { repository.setReminderEnabled(reminder, enabled) }
+    }
+
+    fun deleteReminder(reminder: LedgerReminder) {
+        viewModelScope.launch { repository.deleteReminder(reminder.id) }
     }
 
     fun update(entry: LedgerEntry) {

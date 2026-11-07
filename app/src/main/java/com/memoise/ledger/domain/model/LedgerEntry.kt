@@ -73,6 +73,15 @@ data class LedgerNote(
     val updatedAt: Long,
 )
 
+data class LedgerReminder(
+    val id: String,
+    val entryId: String,
+    val triggerAt: Long,
+    val enabled: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 data class LedgerEntry(
     val id: String,
     val title: String,

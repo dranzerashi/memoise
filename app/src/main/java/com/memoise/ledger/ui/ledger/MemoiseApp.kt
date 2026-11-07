@@ -1,6 +1,12 @@
 package com.memoise.ledger.ui.ledger
 
+import android.Manifest
+import android.app.TimePickerDialog
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -55,6 +61,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -77,9 +84,13 @@ import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
+import com.memoise.ledger.domain.model.LedgerReminder
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -203,6 +214,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     val notes by remember(entry.id) {
                         viewModel.notesFor(entry.id)
                     }.collectAsState(initial = emptyList())
+                    val reminders by remember(entry.id) {
+                        viewModel.remindersFor(entry.id)
+                    }.collectAsState(initial = emptyList())
                     EntryDetailScreen(
                         entry = entry,
                         entries = entries,
@@ -211,6 +225,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         activities = activities,
                         descriptionBlocks = descriptionBlocks,
                         notes = notes,
+                        reminders = reminders,
                         onUpdate = viewModel::update,
                         onSetStatus = viewModel::setStatus,
                         onSetDatePurpose = viewModel::setDatePurpose,
@@ -228,6 +243,10 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         onAddNote = viewModel::addNote,
                         onUpdateNote = viewModel::updateNote,
                         onDeleteNote = viewModel::deleteNote,
+                        onAddReminder = viewModel::addReminder,
+                        onUpdateReminder = viewModel::updateReminder,
+                        onSetReminderEnabled = viewModel::setReminderEnabled,
+                        onDeleteReminder = viewModel::deleteReminder,
                         onConvertChecklistItems = { type, items ->
                             navController.navigate(
                                 "related-capture/${entry.id}/${type.name}?sourceChecklistItemIds=${items.joinToString(",") { it.id }}",
@@ -779,6 +798,7 @@ private fun EntryDetailScreen(
     activities: List<LedgerActivity>,
     descriptionBlocks: List<LedgerDescriptionBlock>,
     notes: List<LedgerNote>,
+    reminders: List<LedgerReminder>,
     onUpdate: (LedgerEntry) -> Unit,
     onSetStatus: (LedgerEntry, EntryStatus) -> Unit,
     onSetDatePurpose: (LedgerEntry, DatePurpose) -> Unit,
@@ -793,6 +813,10 @@ private fun EntryDetailScreen(
     onAddNote: (String, String) -> Unit,
     onUpdateNote: (LedgerNote) -> Unit,
     onDeleteNote: (LedgerNote) -> Unit,
+    onAddReminder: (String, Long) -> Unit,
+    onUpdateReminder: (LedgerReminder, Long) -> Unit,
+    onSetReminderEnabled: (LedgerReminder, Boolean) -> Unit,
+    onDeleteReminder: (LedgerReminder) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -910,6 +934,16 @@ private fun EntryDetailScreen(
                     onAdd = onAddNote,
                     onUpdate = onUpdateNote,
                     onDelete = onDeleteNote,
+                )
+                Spacer(Modifier.height(22.dp))
+                ReminderSection(
+                    entryId = entry.id,
+                    entryStatus = entry.status,
+                    reminders = reminders,
+                    onAdd = onAddReminder,
+                    onUpdate = onUpdateReminder,
+                    onSetEnabled = onSetReminderEnabled,
+                    onDelete = onDeleteReminder,
                 )
                 Spacer(Modifier.height(32.dp))
                 Box(
@@ -1570,6 +1604,235 @@ private fun NoteRow(
             },
         )
     }
+}
+
+@Composable
+private fun ReminderSection(
+    entryId: String,
+    entryStatus: EntryStatus,
+    reminders: List<LedgerReminder>,
+    onAdd: (String, Long) -> Unit,
+    onUpdate: (LedgerReminder, Long) -> Unit,
+    onSetEnabled: (LedgerReminder, Boolean) -> Unit,
+    onDelete: (LedgerReminder) -> Unit,
+) {
+    val context = LocalContext.current
+    var showEditor by rememberSaveable(entryId) { mutableStateOf(false) }
+    var editingReminder by remember(entryId) { mutableStateOf<LedgerReminder?>(null) }
+    var permissionDenied by rememberSaveable(entryId) { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            permissionDenied = false
+            showEditor = true
+        } else {
+            permissionDenied = true
+        }
+    }
+    val openEditor: (LedgerReminder?) -> Unit = { reminder ->
+        editingReminder = reminder
+        val hasPermission = Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (hasPermission) {
+            showEditor = true
+        } else {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val canAdd = entryStatus != EntryStatus.COMPLETED && entryStatus != EntryStatus.CANCELLED
+
+    Column {
+        SectionLabel("REMINDERS")
+        if (reminders.isEmpty()) {
+            Text(
+                text = "Reminders are independent of the entry date.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 7.dp),
+            )
+        } else {
+            reminders.forEach { reminder ->
+                ReminderRow(
+                    reminder = reminder,
+                    canManage = canAdd,
+                    onEdit = { openEditor(reminder) },
+                    onSetEnabled = { enabled -> onSetEnabled(reminder, enabled) },
+                    onDelete = { onDelete(reminder) },
+                )
+            }
+        }
+        TextButton(
+            onClick = { openEditor(null) },
+            enabled = canAdd,
+            modifier = Modifier.align(Alignment.End),
+        ) { Text("Add reminder") }
+        if (!canAdd) {
+            Text(
+                text = "Complete or cancelled entries can’t have active reminders.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (permissionDenied) {
+            Text(
+                text = "Allow notifications in Android Settings to use reminders.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+
+    if (showEditor) {
+        ReminderEditorDialog(
+            reminder = editingReminder,
+            onDismiss = { showEditor = false },
+            onSave = { current, triggerAt ->
+                if (current == null) onAdd(entryId, triggerAt) else onUpdate(current, triggerAt)
+                showEditor = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun ReminderRow(
+    reminder: LedgerReminder,
+    canManage: Boolean,
+    onEdit: () -> Unit,
+    onSetEnabled: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuExpanded by remember(reminder.id) { mutableStateOf(false) }
+    val hasPassed = reminder.triggerAt <= System.currentTimeMillis()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = formatDateTime(reminder.triggerAt),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = when {
+                    reminder.enabled -> "Approximate reminder"
+                    hasPassed -> "Sent or missed"
+                    else -> "Off"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Box {
+            TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                if (canManage) {
+                    DropdownMenuItem(
+                        text = { Text("Edit reminder") },
+                        onClick = {
+                            menuExpanded = false
+                            onEdit()
+                        },
+                    )
+                }
+                if (canManage && reminder.enabled) {
+                    DropdownMenuItem(
+                        text = { Text("Turn off") },
+                        onClick = {
+                            menuExpanded = false
+                            onSetEnabled(false)
+                        },
+                    )
+                } else if (canManage && !hasPassed) {
+                    DropdownMenuItem(
+                        text = { Text("Turn on") },
+                        onClick = {
+                            menuExpanded = false
+                            onSetEnabled(true)
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Remove reminder", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        menuExpanded = false
+                        onDelete()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReminderEditorDialog(
+    reminder: LedgerReminder?,
+    onDismiss: () -> Unit,
+    onSave: (LedgerReminder?, Long) -> Unit,
+) {
+    val context = LocalContext.current
+    val initial = remember(reminder?.id) {
+        reminder?.triggerAt?.let { millis ->
+            java.time.Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        } ?: LocalDateTime.now().plusHours(1).withSecond(0).withNano(0)
+    }
+    var date by remember(reminder?.id) { mutableStateOf(initial.toLocalDate()) }
+    var time by remember(reminder?.id) { mutableStateOf(initial.toLocalTime()) }
+    val triggerAt = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val isFuture = triggerAt > System.currentTimeMillis()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (reminder == null) "Add reminder" else "Edit reminder") },
+        text = {
+            Column {
+                Text(
+                    text = "Choose when to be notified. Delivery time is approximate.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                DatePickerControl(
+                    date = date,
+                    onDateSelected = { if (it != null) date = it },
+                    label = "Reminder date",
+                )
+                TextButton(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, hour, minute -> time = LocalTime.of(hour, minute) },
+                            time.hour,
+                            time.minute,
+                            false,
+                        ).show()
+                    },
+                ) {
+                    Text("At ${time.format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))}")
+                }
+                if (!isFuture) {
+                    Text(
+                        text = "Choose a time in the future.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(reminder, triggerAt) },
+                enabled = isFuture,
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
