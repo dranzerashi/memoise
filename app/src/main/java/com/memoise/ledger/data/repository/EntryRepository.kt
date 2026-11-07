@@ -28,6 +28,10 @@ import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.RelationshipType
+import com.memoise.ledger.domain.model.EntryType
+import com.memoise.ledger.domain.model.LedgerSearchMatch
+import com.memoise.ledger.domain.model.SearchDateFilter
+import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -44,6 +48,15 @@ import org.json.JSONObject
 
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
+    fun searchEntries(
+        query: String,
+        status: EntryStatus?,
+        type: EntryType?,
+        dateFilter: SearchDateFilter,
+        dateFrom: LocalDate?,
+        dateTo: LocalDate?,
+        relationshipFilter: SearchRelationshipFilter,
+    ): Flow<List<LedgerSearchMatch>>
     fun observeRelationships(entryId: String): Flow<List<LedgerRelationship>>
     fun observeChecklist(entryId: String): Flow<List<LedgerChecklistItem>>
     fun observeActivities(entryId: String): Flow<List<LedgerActivity>>
@@ -101,6 +114,35 @@ class RoomEntryRepository @Inject constructor(
     private val recurrenceDao: RecurrenceSeriesDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
+    override fun searchEntries(
+        query: String,
+        status: EntryStatus?,
+        type: EntryType?,
+        dateFilter: SearchDateFilter,
+        dateFrom: LocalDate?,
+        dateTo: LocalDate?,
+        relationshipFilter: SearchRelationshipFilter,
+    ): Flow<List<LedgerSearchMatch>> {
+        val tokens = query.trim()
+            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter(String::isNotBlank)
+            .distinct()
+        if (tokens.isEmpty()) return kotlinx.coroutines.flow.flowOf(emptyList())
+
+        val matchQuery = tokens.joinToString(" AND ") { token -> "\"$token\"*" }
+        return database.entrySearchDao().search(
+            matchQuery = matchQuery,
+            rawQuery = query.trim(),
+            status = status?.name,
+            type = type?.name,
+            dateFilter = dateFilter.name,
+            dateFrom = dateFrom?.toEpochDay(),
+            dateTo = dateTo?.toEpochDay(),
+            relationshipFilter = relationshipFilter.name,
+            todayEpochDay = LocalDate.now().toEpochDay(),
+        ).map { matches -> matches.map { LedgerSearchMatch(it.entryId, it.excerpt) } }
+    }
+
     override fun observeEntries(): Flow<List<LedgerEntry>> = entryDao.observeAll()
         .onStart { maintainRecurrenceWindow() }
         .map { entries -> entries.map(EntryEntity::toDomain) }

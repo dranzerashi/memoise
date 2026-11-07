@@ -16,8 +16,9 @@ import androidx.room.TypeConverters
         EntryNoteEntity::class,
         EntryReminderEntity::class,
         RecurrenceSeriesEntity::class,
+        EntrySearchFtsEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -30,6 +31,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryNoteDao(): EntryNoteDao
     abstract fun entryReminderDao(): EntryReminderDao
     abstract fun recurrenceSeriesDao(): RecurrenceSeriesDao
+    abstract fun entrySearchDao(): EntrySearchDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -207,5 +209,170 @@ abstract class MemoiseDatabase : RoomDatabase() {
                 )
             }
         }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE VIRTUAL TABLE IF NOT EXISTS `ledger_search_fts` USING FTS4(
+                        `entryId` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `notes` TEXT NOT NULL,
+                        `checklist` TEXT NOT NULL,
+                        `relatedTitles` TEXT NOT NULL
+                    )""".trimIndent(),
+                )
+                SEARCH_INDEX_TRIGGERS.forEach(db::execSQL)
+                db.execSQL(
+                    """INSERT INTO `ledger_search_fts`
+                        (`rowid`, `entryId`, `title`, `description`, `notes`, `checklist`, `relatedTitles`)
+                        SELECT entry.`rowid`, entry.`id`, entry.`title`,
+                            COALESCE((SELECT group_concat(block.`content`, ' ')
+                                FROM `entry_description_blocks` AS block WHERE block.`entryId` = entry.`id`), ''),
+                            COALESCE((SELECT group_concat(note.`content`, ' ')
+                                FROM `entry_notes` AS note WHERE note.`entryId` = entry.`id`), ''),
+                            COALESCE((SELECT group_concat(item.`title`, ' ')
+                                FROM `entry_checklist_items` AS item WHERE item.`entryId` = entry.`id`), ''),
+                            COALESCE((SELECT group_concat(other.`title`, ' ')
+                                FROM `entry_relationships` AS relationship
+                                JOIN `ledger_entries` AS other ON other.`id` = CASE
+                                    WHEN relationship.`sourceEntryId` = entry.`id` THEN relationship.`targetEntryId`
+                                    ELSE relationship.`sourceEntryId` END
+                                WHERE relationship.`sourceEntryId` = entry.`id`
+                                   OR relationship.`targetEntryId` = entry.`id`), '')
+                        FROM `ledger_entries` AS entry""".trimIndent(),
+                )
+            }
+        }
+
+        private val SEARCH_INDEX_TRIGGERS = listOf(
+            """CREATE TRIGGER `ledger_search_entry_insert` AFTER INSERT ON `ledger_entries` BEGIN
+                INSERT OR REPLACE INTO `ledger_search_fts`
+                    (`rowid`, `entryId`, `title`, `description`, `notes`, `checklist`, `relatedTitles`)
+                VALUES (NEW.`rowid`, NEW.`id`, NEW.`title`,
+                    COALESCE((SELECT group_concat(`content`, ' ') FROM `entry_description_blocks` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(`content`, ' ') FROM `entry_notes` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(other.`title`, ' ')
+                        FROM `entry_relationships` AS relationship
+                        JOIN `ledger_entries` AS other ON other.`id` = CASE
+                            WHEN relationship.`sourceEntryId` = NEW.`id` THEN relationship.`targetEntryId`
+                            ELSE relationship.`sourceEntryId` END
+                        WHERE relationship.`sourceEntryId` = NEW.`id`
+                           OR relationship.`targetEntryId` = NEW.`id`), ''));
+            END""",
+            """CREATE TRIGGER `ledger_search_entry_title_update` AFTER UPDATE OF `title` ON `ledger_entries` BEGIN
+                INSERT OR REPLACE INTO `ledger_search_fts`
+                    (`rowid`, `entryId`, `title`, `description`, `notes`, `checklist`, `relatedTitles`)
+                VALUES (NEW.`rowid`, NEW.`id`, NEW.`title`,
+                    COALESCE((SELECT group_concat(`content`, ' ') FROM `entry_description_blocks` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(`content`, ' ') FROM `entry_notes` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = NEW.`id`), ''),
+                    COALESCE((SELECT group_concat(other.`title`, ' ')
+                        FROM `entry_relationships` AS relationship
+                        JOIN `ledger_entries` AS other ON other.`id` = CASE
+                            WHEN relationship.`sourceEntryId` = NEW.`id` THEN relationship.`targetEntryId`
+                            ELSE relationship.`sourceEntryId` END
+                        WHERE relationship.`sourceEntryId` = NEW.`id`
+                           OR relationship.`targetEntryId` = NEW.`id`), ''));
+                UPDATE `ledger_search_fts` SET `relatedTitles` = COALESCE((
+                    SELECT group_concat(other.`title`, ' ')
+                    FROM `entry_relationships` AS relationship
+                    JOIN `ledger_entries` AS other ON other.`id` = CASE
+                        WHEN relationship.`sourceEntryId` = `ledger_search_fts`.`entryId` THEN relationship.`targetEntryId`
+                        ELSE relationship.`sourceEntryId` END
+                    WHERE relationship.`sourceEntryId` = `ledger_search_fts`.`entryId`
+                       OR relationship.`targetEntryId` = `ledger_search_fts`.`entryId`), '')
+                WHERE `entryId` IN (
+                    SELECT `sourceEntryId` FROM `entry_relationships` WHERE `targetEntryId` = NEW.`id`
+                    UNION SELECT `targetEntryId` FROM `entry_relationships` WHERE `sourceEntryId` = NEW.`id`
+                );
+            END""",
+            """CREATE TRIGGER `ledger_search_entry_delete` AFTER DELETE ON `ledger_entries` BEGIN
+                DELETE FROM `ledger_search_fts` WHERE `rowid` = OLD.`rowid`;
+                UPDATE `ledger_search_fts` SET `relatedTitles` = COALESCE((
+                    SELECT group_concat(other.`title`, ' ')
+                    FROM `entry_relationships` AS relationship
+                    JOIN `ledger_entries` AS other ON other.`id` = CASE
+                        WHEN relationship.`sourceEntryId` = `ledger_search_fts`.`entryId` THEN relationship.`targetEntryId`
+                        ELSE relationship.`sourceEntryId` END
+                    WHERE relationship.`sourceEntryId` = `ledger_search_fts`.`entryId`
+                       OR relationship.`targetEntryId` = `ledger_search_fts`.`entryId`), '')
+                WHERE `entryId` IN (
+                    SELECT `sourceEntryId` FROM `entry_relationships` WHERE `targetEntryId` = OLD.`id`
+                    UNION SELECT `targetEntryId` FROM `entry_relationships` WHERE `sourceEntryId` = OLD.`id`
+                );
+            END""",
+            """CREATE TRIGGER `ledger_search_description_insert` AFTER INSERT ON `entry_description_blocks` BEGIN
+                UPDATE `ledger_search_fts` SET `description` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_description_blocks` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_description_update` AFTER UPDATE ON `entry_description_blocks` BEGIN
+                UPDATE `ledger_search_fts` SET `description` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_description_blocks` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_description_delete` AFTER DELETE ON `entry_description_blocks` BEGIN
+                UPDATE `ledger_search_fts` SET `description` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_description_blocks` WHERE `entryId` = OLD.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = OLD.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_note_insert` AFTER INSERT ON `entry_notes` BEGIN
+                UPDATE `ledger_search_fts` SET `notes` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_notes` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_note_update` AFTER UPDATE ON `entry_notes` BEGIN
+                UPDATE `ledger_search_fts` SET `notes` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_notes` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_note_delete` AFTER DELETE ON `entry_notes` BEGIN
+                UPDATE `ledger_search_fts` SET `notes` = COALESCE((
+                    SELECT group_concat(`content`, ' ') FROM `entry_notes` WHERE `entryId` = OLD.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = OLD.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_checklist_insert` AFTER INSERT ON `entry_checklist_items` BEGIN
+                UPDATE `ledger_search_fts` SET `checklist` = COALESCE((
+                    SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_checklist_update` AFTER UPDATE ON `entry_checklist_items` BEGIN
+                UPDATE `ledger_search_fts` SET `checklist` = COALESCE((
+                    SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = NEW.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = NEW.`entryId`);
+                UPDATE `ledger_search_fts` SET `checklist` = COALESCE((
+                    SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = OLD.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = OLD.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_checklist_delete` AFTER DELETE ON `entry_checklist_items` BEGIN
+                UPDATE `ledger_search_fts` SET `checklist` = COALESCE((
+                    SELECT group_concat(`title`, ' ') FROM `entry_checklist_items` WHERE `entryId` = OLD.`entryId`), '')
+                WHERE `rowid` = (SELECT `rowid` FROM `ledger_entries` WHERE `id` = OLD.`entryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_relationship_insert` AFTER INSERT ON `entry_relationships` BEGIN
+                UPDATE `ledger_search_fts` SET `relatedTitles` = COALESCE((
+                    SELECT group_concat(other.`title`, ' ')
+                    FROM `entry_relationships` AS relationship
+                    JOIN `ledger_entries` AS other ON other.`id` = CASE
+                        WHEN relationship.`sourceEntryId` = `ledger_search_fts`.`entryId` THEN relationship.`targetEntryId`
+                        ELSE relationship.`sourceEntryId` END
+                    WHERE relationship.`sourceEntryId` = `ledger_search_fts`.`entryId`
+                       OR relationship.`targetEntryId` = `ledger_search_fts`.`entryId`), '')
+                WHERE `entryId` IN (NEW.`sourceEntryId`, NEW.`targetEntryId`);
+            END""",
+            """CREATE TRIGGER `ledger_search_relationship_delete` AFTER DELETE ON `entry_relationships` BEGIN
+                UPDATE `ledger_search_fts` SET `relatedTitles` = COALESCE((
+                    SELECT group_concat(other.`title`, ' ')
+                    FROM `entry_relationships` AS relationship
+                    JOIN `ledger_entries` AS other ON other.`id` = CASE
+                        WHEN relationship.`sourceEntryId` = `ledger_search_fts`.`entryId` THEN relationship.`targetEntryId`
+                        ELSE relationship.`sourceEntryId` END
+                    WHERE relationship.`sourceEntryId` = `ledger_search_fts`.`entryId`
+                       OR relationship.`targetEntryId` = `ledger_search_fts`.`entryId`), '')
+                WHERE `entryId` IN (OLD.`sourceEntryId`, OLD.`targetEntryId`);
+            END""",
+        )
     }
 }

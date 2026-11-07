@@ -119,3 +119,12 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Entry date-purpose layout
 
 - Placed Status and “What this date means” selectors side by side when an entry has a date. The build is ready for Pixel verification.
+
+## 2026-11-07 — Local search
+
+- Added a Search destination for titles, description paragraphs, notes, checklist items, and linked entry titles, with status, type, and date filters.
+- Added a Room FTS4 index with database triggers and migration from schema version 10 to 11. The debug build is ready for Pixel verification.
+
+## 2026-11-07 — Search filters
+
+- Added selectable date ranges and filters for entries with or without links.

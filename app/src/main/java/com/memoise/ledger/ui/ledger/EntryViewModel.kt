@@ -15,6 +15,10 @@ import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.RelationshipType
+import com.memoise.ledger.domain.model.EntryType
+import com.memoise.ledger.domain.model.LedgerSearchMatch
+import com.memoise.ledger.domain.model.SearchDateFilter
+import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.util.UUID
@@ -35,6 +39,16 @@ class EntryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
     )
+
+    fun searchEntries(
+        query: String,
+        status: EntryStatus?,
+        type: EntryType?,
+        dateFilter: SearchDateFilter,
+        dateFrom: LocalDate?,
+        dateTo: LocalDate?,
+        relationshipFilter: SearchRelationshipFilter,
+    ) = repository.searchEntries(query, status, type, dateFilter, dateFrom, dateTo, relationshipFilter)
 
     fun create(title: String, scheduledDate: LocalDate?) {
         val entry = newEntry(title, scheduledDate) ?: return

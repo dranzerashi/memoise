@@ -71,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -78,6 +80,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.memoise.ledger.domain.model.DatePurpose
+import com.memoise.ledger.domain.model.EntryType
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerActivity
@@ -89,6 +92,9 @@ import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
+import com.memoise.ledger.domain.model.LedgerSearchMatch
+import com.memoise.ledger.domain.model.SearchDateFilter
+import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -100,6 +106,7 @@ import java.util.Locale
 private const val TIMELINE_ROUTE = "timeline"
 private const val UNSCHEDULED_ROUTE = "unscheduled"
 private const val OVERDUE_ROUTE = "overdue"
+private const val SEARCH_ROUTE = "search"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
 private const val RELATED_CAPTURE_ROUTE =
@@ -109,6 +116,7 @@ private enum class PrimaryDestination(val route: String, val label: String, val 
     TIMELINE(TIMELINE_ROUTE, "Timeline", "◷"),
     UNSCHEDULED(UNSCHEDULED_ROUTE, "Unscheduled", "○"),
     OVERDUE(OVERDUE_ROUTE, "Overdue", "!"),
+    SEARCH(SEARCH_ROUTE, "Search", "⌕"),
 }
 
 @Composable
@@ -121,6 +129,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
         TIMELINE_ROUTE,
         UNSCHEDULED_ROUTE,
         OVERDUE_ROUTE,
+        SEARCH_ROUTE,
     )
 
     Scaffold(
@@ -189,6 +198,13 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                             entry.status != EntryStatus.COMPLETED &&
                             entry.status != EntryStatus.CANCELLED
                     }.sortedByDescending { it.scheduledDate },
+                    onOpenEntry = { navController.navigate("entry/${it.id}") },
+                )
+            }
+            composable(SEARCH_ROUTE) {
+                SearchScreen(
+                    entries = entries,
+                    search = viewModel::searchEntries,
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
                 )
             }
@@ -485,6 +501,293 @@ private fun OverdueScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchScreen(
+    entries: List<LedgerEntry>,
+    search: (
+        String,
+        EntryStatus?,
+        EntryType?,
+        SearchDateFilter,
+        LocalDate?,
+        LocalDate?,
+        SearchRelationshipFilter,
+    ) -> Flow<List<LedgerSearchMatch>>,
+    onOpenEntry: (LedgerEntry) -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var statusLabel by rememberSaveable { mutableStateOf("Any status") }
+    var typeLabel by rememberSaveable { mutableStateOf("Any type") }
+    var dateLabel by rememberSaveable { mutableStateOf("Any date") }
+    var relationshipLabel by rememberSaveable { mutableStateOf("Any links") }
+    var fromDateText by rememberSaveable { mutableStateOf<String?>(null) }
+    var toDateText by rememberSaveable { mutableStateOf<String?>(null) }
+    val fromDate = fromDateText?.let(LocalDate::parse)
+    val toDate = toDateText?.let(LocalDate::parse)
+
+    val statusOptions = remember {
+        linkedMapOf<String, EntryStatus?>("Any status" to null).apply {
+            EntryStatus.entries.forEach { put(it.displayName(), it) }
+        }
+    }
+    val typeOptions = remember {
+        linkedMapOf<String, EntryType?>("Any type" to null).apply {
+            EntryType.entries.forEach { put(it.displayName(), it) }
+        }
+    }
+    val dateOptions = remember {
+        linkedMapOf(
+            "Any date" to SearchDateFilter.ANY,
+            "Past dates" to SearchDateFilter.PAST,
+            "Upcoming" to SearchDateFilter.UPCOMING,
+            "Unscheduled" to SearchDateFilter.UNSCHEDULED,
+            "Date range" to SearchDateFilter.RANGE,
+        )
+    }
+    val relationshipOptions = remember {
+        linkedMapOf(
+            "Any links" to SearchRelationshipFilter.ANY,
+            "Has linked entries" to SearchRelationshipFilter.LINKED,
+            "No linked entries" to SearchRelationshipFilter.UNLINKED,
+        )
+    }
+    val selectedStatus = statusOptions[statusLabel]
+    val selectedType = typeOptions[typeLabel]
+    val selectedDateFilter = dateOptions[dateLabel] ?: SearchDateFilter.ANY
+    val selectedRelationshipFilter = relationshipOptions[relationshipLabel] ?: SearchRelationshipFilter.ANY
+    val resultsFlow = remember(
+        query,
+        selectedStatus,
+        selectedType,
+        selectedDateFilter,
+        fromDate,
+        toDate,
+        selectedRelationshipFilter,
+    ) {
+        if (query.isBlank()) flowOf(emptyList())
+        else search(
+            query,
+            selectedStatus,
+            selectedType,
+            selectedDateFilter,
+            fromDate,
+            toDate,
+            selectedRelationshipFilter,
+        )
+    }
+    val matches by resultsFlow.collectAsState(initial = emptyList())
+    val entriesById = remember(entries) { entries.associateBy(LedgerEntry::id) }
+
+    Column(Modifier.fillMaxSize()) {
+        LedgerHeader(
+            title = "Search",
+            subtitle = "Find a detail anywhere in your ledger.",
+        )
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            singleLine = true,
+            placeholder = { Text("Search everything…") },
+            leadingIcon = { Text("⌕", fontSize = 22.sp) },
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                SectionLabel("STATUS")
+                EntryDropdown(
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = statusLabel,
+                    options = statusOptions,
+                    onSelected = { statusLabel = it },
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                SectionLabel("ENTRY TYPE")
+                EntryDropdown(
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = typeLabel,
+                    options = typeOptions,
+                    onSelected = { typeLabel = it },
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                SectionLabel("DATE")
+                EntryDropdown(
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = dateLabel,
+                    options = dateOptions,
+                    onSelected = { dateLabel = it },
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                SectionLabel("LINKS")
+                EntryDropdown(
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = relationshipLabel,
+                    options = relationshipOptions,
+                    onSelected = { relationshipLabel = it },
+                )
+            }
+        }
+        if (selectedDateFilter == SearchDateFilter.RANGE) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    SectionLabel("FROM")
+                    SearchDateField("Choose date", fromDate) { fromDateText = it?.toString() }
+                }
+                Column(Modifier.weight(1f)) {
+                    SectionLabel("THROUGH")
+                    SearchDateField("Choose date", toDate) { toDateText = it?.toString() }
+                }
+            }
+        }
+
+        when {
+            query.isBlank() -> Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Search titles, descriptions, notes, checklists, and linked entries.",
+                    modifier = Modifier.padding(horizontal = 36.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            matches.isEmpty() -> Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "No entries found. Try another word or adjust the filters.",
+                    modifier = Modifier.padding(horizontal = 36.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            else -> LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 20.dp),
+            ) {
+                item {
+                    SectionLabel("RESULTS")
+                    Spacer(Modifier.height(6.dp))
+                }
+                items(matches, key = LedgerSearchMatch::entryId) { match ->
+                    val entry = entriesById[match.entryId]
+                    if (entry != null) SearchResultRow(entry, match.excerpt) { onOpenEntry(entry) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(
+    entry: LedgerEntry,
+    excerpt: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 26.dp, vertical = 11.dp),
+    ) {
+        Text(
+            entry.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        val details = buildList {
+            entry.scheduledDate?.let { add(formatDate(it)) }
+            if (entry.status != EntryStatus.PENDING) add(entry.status.displayName())
+        }.joinToString(" · ")
+        if (details.isNotBlank()) {
+            Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (excerpt.isNotBlank() && !excerpt.equals(entry.title, ignoreCase = true)) {
+            Text(
+                excerpt,
+                modifier = Modifier.padding(top = 3.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 26.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant),
+    )
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun SearchDateField(
+    label: String,
+    date: LocalDate?,
+    onDateSelected: (LocalDate?) -> Unit,
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = date?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 8.dp),
+            onClick = { showPicker = true },
+        ) {
+            Text(
+                date?.format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())) ?: label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (date != null) {
+            TextButton(
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                onClick = { onDateSelected(null) },
+            ) { Text("×") }
+        }
+    }
+    if (showPicker) {
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { millis ->
+                            onDateSelected(java.time.Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate())
+                        }
+                        showPicker = false
+                    },
+                ) { Text("Set date") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } },
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 }
@@ -2378,6 +2681,13 @@ private fun DatePurpose.displayName(): String = when (this) {
     DatePurpose.EVENT -> "Event"
     DatePurpose.DEADLINE -> "Due by"
     DatePurpose.FLEXIBLE_TASK -> "Maybe on"
+}
+
+private fun EntryType.displayName(): String = when (this) {
+    EntryType.TASK -> "Task"
+    EntryType.EVENT -> "Event"
+    EntryType.OCCASION -> "Occasion"
+    EntryType.NOTE -> "Note"
 }
 
 private fun RelationshipType.creationLabel(): String = when (this) {

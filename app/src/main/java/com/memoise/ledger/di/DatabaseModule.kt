@@ -42,6 +42,7 @@ object DatabaseModule {
         MemoiseDatabase.MIGRATION_7_8,
         MemoiseDatabase.MIGRATION_8_9,
         MemoiseDatabase.MIGRATION_9_10,
+        MemoiseDatabase.MIGRATION_10_11,
     ).build()
 
     @Provides
