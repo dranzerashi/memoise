@@ -115,3 +115,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Date-purpose wording
 
 - Changed the date-purpose choices to “Event”, “Due by”, and “Maybe on”.
+
+## 2026-11-07 — Entry date-purpose layout
+
+- Placed Status and “What this date means” selectors side by side when an entry has a date. The build is ready for Pixel verification.

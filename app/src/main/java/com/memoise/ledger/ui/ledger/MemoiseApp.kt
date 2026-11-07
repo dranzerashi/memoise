@@ -906,24 +906,47 @@ private fun EntryDetailScreen(
                     canRemoveDate = true,
                 )
                 Spacer(Modifier.height(12.dp))
-                SectionLabel("STATUS")
-                EntryDropdown(
-                    selected = entry.status.displayName(),
-                    options = EntryStatus.entries.associateBy { it.displayName() },
-                    onSelected = { label ->
-                        EntryStatus.entries.firstOrNull { it.displayName() == label }
-                            ?.let { onSetStatus(entry, it) }
-                    },
-                )
                 if (entry.scheduledDate != null) {
-                    Spacer(Modifier.height(18.dp))
-                    SectionLabel("WHAT THIS DATE MEANS")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            SectionLabel("STATUS")
+                            Spacer(Modifier.height(6.dp))
+                            EntryDropdown(
+                                modifier = Modifier.fillMaxWidth(),
+                                selected = entry.status.displayName(),
+                                options = EntryStatus.entries.associateBy { it.displayName() },
+                                onSelected = { label ->
+                                    EntryStatus.entries.firstOrNull { it.displayName() == label }
+                                        ?.let { onSetStatus(entry, it) }
+                                },
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            SectionLabel("WHAT THIS DATE MEANS")
+                            Spacer(Modifier.height(6.dp))
+                            EntryDropdown(
+                                modifier = Modifier.fillMaxWidth(),
+                                selected = entry.datePurpose.displayName(),
+                                options = DatePurpose.entries.associateBy { it.displayName() },
+                                onSelected = { label ->
+                                    DatePurpose.entries.firstOrNull { it.displayName() == label }
+                                        ?.let { onSetDatePurpose(entry, it) }
+                                },
+                            )
+                        }
+                    }
+                } else {
+                    SectionLabel("STATUS")
                     EntryDropdown(
-                        selected = entry.datePurpose.displayName(),
-                        options = DatePurpose.entries.associateBy { it.displayName() },
+                        selected = entry.status.displayName(),
+                        options = EntryStatus.entries.associateBy { it.displayName() },
                         onSelected = { label ->
-                            DatePurpose.entries.firstOrNull { it.displayName() == label }
-                                ?.let { onSetDatePurpose(entry, it) }
+                            EntryStatus.entries.firstOrNull { it.displayName() == label }
+                                ?.let { onSetStatus(entry, it) }
                         },
                     )
                 }
@@ -2272,13 +2295,19 @@ private fun DatePickerControl(
 
 @Composable
 private fun EntryDropdown(
+    modifier: Modifier = Modifier,
     selected: String,
     options: Map<String, *>,
     onSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { expanded = true }) { Text(selected) }
+    Box(modifier) {
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { expanded = true },
+        ) {
+            Text(selected, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.keys.forEach { option ->
                 DropdownMenuItem(
