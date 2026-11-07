@@ -97,6 +97,7 @@ import com.memoise.ledger.domain.model.RelationshipType
 import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
+import com.memoise.ledger.domain.model.LedgerRestorePreview
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -127,6 +128,8 @@ fun MemoiseApp(viewModel: EntryViewModel) {
     val entries by viewModel.entries.collectAsState()
     val navController = rememberNavController()
     val context = LocalContext.current
+    var restorePreview by remember { mutableStateOf<LedgerRestorePreview?>(null) }
+    var restoringBackup by remember { mutableStateOf(false) }
     val exportDocumentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri: Uri? ->
@@ -137,6 +140,18 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     if (success) "JSON export saved" else "Could not save the export",
                     Toast.LENGTH_SHORT,
                 ).show()
+            }
+        }
+    }
+    val restoreDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.prepareRestore(uri) { preview, error ->
+                restorePreview = preview
+                if (error != null) {
+                    Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -234,6 +249,27 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     onBack = { navController.popBackStack() },
                     onExportJson = {
                         exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
+                    },
+                    onChooseRestoreFile = {
+                        restoreDocumentLauncher.launch(arrayOf("application/json", "text/json", "text/*"))
+                    },
+                    restorePreview = restorePreview,
+                    restoring = restoringBackup,
+                    onDismissRestore = {
+                        restorePreview = null
+                        viewModel.discardPreparedRestore()
+                    },
+                    onConfirmRestore = {
+                        restoringBackup = true
+                        viewModel.restorePrepared { success, error ->
+                            restoringBackup = false
+                            restorePreview = null
+                            Toast.makeText(
+                                context,
+                                if (success) "Ledger restored" else (error ?: "Could not restore this backup"),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     },
                 )
             }
@@ -835,6 +871,11 @@ private fun SearchDateField(
 private fun SettingsScreen(
     onBack: () -> Unit,
     onExportJson: () -> Unit,
+    onChooseRestoreFile: () -> Unit,
+    restorePreview: LedgerRestorePreview?,
+    restoring: Boolean,
+    onDismissRestore: () -> Unit,
+    onConfirmRestore: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         LedgerHeader(
@@ -856,6 +897,34 @@ private fun SettingsScreen(
         ) {
             Text("Export JSON")
         }
+        TextButton(
+            onClick = onChooseRestoreFile,
+            modifier = Modifier.padding(start = 26.dp),
+            enabled = !restoring,
+        ) {
+            Text("Restore from JSON")
+        }
+    }
+    restorePreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { if (!restoring) onDismissRestore() },
+            title = { Text("Replace this ledger?") },
+            text = {
+                Text(
+                    "This backup from ${preview.exportedAt.substringBefore('T')} contains " +
+                        "${preview.entryCount} entries and ${preview.relationshipCount} links. " +
+                        "Restoring it will replace the ledger on this device, including its notes, reminders, checklists, and history.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirmRestore, enabled = !restoring) {
+                    Text(if (restoring) "Restoring…" else "Replace ledger")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissRestore, enabled = !restoring) { Text("Cancel") }
+            },
+        )
     }
 }
 

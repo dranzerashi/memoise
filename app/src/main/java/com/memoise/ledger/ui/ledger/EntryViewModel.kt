@@ -21,6 +21,7 @@ import com.memoise.ledger.domain.model.EntryType
 import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
+import com.memoise.ledger.domain.model.LedgerRestorePreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -41,6 +42,7 @@ class EntryViewModel @Inject constructor(
     private val repository: EntryRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    private var pendingRestoreJson: String? = null
     val entries: StateFlow<List<LedgerEntry>> = repository.observeEntries().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -73,6 +75,49 @@ class EntryViewModel @Inject constructor(
                 false
             }
             onFinished(saved)
+        }
+    }
+
+    fun prepareRestore(uri: Uri, onPrepared: (LedgerRestorePreview?, String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: error("Could not open the selected file")
+                    input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                }
+                val preview = withContext(Dispatchers.Default) { repository.inspectBackup(json) }
+                pendingRestoreJson = json
+                onPrepared(preview, null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                pendingRestoreJson = null
+                onPrepared(null, error.message ?: "Could not read this backup file.")
+            }
+        }
+    }
+
+    fun discardPreparedRestore() {
+        pendingRestoreJson = null
+    }
+
+    fun restorePrepared(onFinished: (Boolean, String?) -> Unit) {
+        val json = pendingRestoreJson
+        if (json == null) {
+            onFinished(false, "Choose a backup file first.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                repository.restoreBackup(json)
+                pendingRestoreJson = null
+                onFinished(true, null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onFinished(false, error.message ?: "Could not restore this backup.")
+            }
         }
     }
 

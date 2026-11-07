@@ -133,3 +133,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 
 - Added a Settings action that exports a transactionally consistent snapshot of entries, links, descriptions, checklists, notes, history, reminders, and recurrence rules through Android’s document picker.
 - The portable JSON includes app/database versions, a backup format version, and a SHA-256 integrity digest. The debug build is ready for Pixel verification.
+
+## 2026-11-07 — JSON restore
+
+- Added JSON restore with checksum, schema, duplicate, and reference validation before confirmation. Replacing the ledger runs in one Room transaction; reminders are rescheduled afterward.

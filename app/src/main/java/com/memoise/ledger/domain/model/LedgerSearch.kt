@@ -18,3 +18,9 @@ enum class SearchRelationshipFilter {
     LINKED,
     UNLINKED,
 }
+
+data class LedgerRestorePreview(
+    val entryCount: Int,
+    val relationshipCount: Int,
+    val exportedAt: String,
+)

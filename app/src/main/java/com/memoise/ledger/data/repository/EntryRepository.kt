@@ -27,11 +27,13 @@ import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.EntryStatus
+import com.memoise.ledger.domain.model.DatePurpose
 import com.memoise.ledger.domain.model.RelationshipType
 import com.memoise.ledger.domain.model.EntryType
 import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
+import com.memoise.ledger.domain.model.LedgerRestorePreview
 import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -55,6 +57,8 @@ import org.json.JSONArray
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
     suspend fun exportJson(): String
+    suspend fun inspectBackup(json: String): LedgerRestorePreview
+    suspend fun restoreBackup(json: String): LedgerRestorePreview
     fun searchEntries(
         query: String,
         status: EntryStatus?,
@@ -246,6 +250,214 @@ class RoomEntryRepository @Inject constructor(
             .put("exportedAt", Instant.now().toString())
             .put("integrity", JSONObject().put("algorithm", "SHA-256").put("digest", digest))
         JSONObject().put("manifest", manifest).put("data", data).toString(2)
+    }
+
+    override suspend fun inspectBackup(json: String): LedgerRestorePreview =
+        parseBackup(json).preview
+
+    override suspend fun restoreBackup(json: String): LedgerRestorePreview {
+        val backup = parseBackup(json)
+        val backupDao = database.ledgerBackupDao()
+        val previousReminderIds = backupDao.reminders().map(EntryReminderEntity::id)
+        database.withTransaction {
+            backupDao.clearRelationships()
+            backupDao.clearReminders()
+            backupDao.clearNotes()
+            backupDao.clearDescriptionBlocks()
+            backupDao.clearChecklistItems()
+            backupDao.clearActivities()
+            backupDao.clearEntries()
+            backupDao.clearRecurrenceSeries()
+
+            backupDao.insertRecurrenceSeries(backup.recurrenceSeries)
+            backupDao.insertEntries(backup.entries)
+            backupDao.insertRelationships(backup.relationships)
+            backupDao.insertDescriptionBlocks(backup.descriptionBlocks)
+            backupDao.insertChecklistItems(backup.checklistItems)
+            backupDao.insertNotes(backup.notes)
+            backupDao.insertActivities(backup.activities)
+            backupDao.insertReminders(backup.reminders)
+        }
+        (previousReminderIds + backup.reminders.map(EntryReminderEntity::id)).distinct()
+            .forEach(reminderScheduler::cancel)
+        val now = System.currentTimeMillis()
+        backup.reminders.forEach { reminder ->
+            if (reminder.enabled && reminder.triggerAt > now) {
+                reminderScheduler.schedule(reminder.id, reminder.triggerAt)
+            }
+        }
+        return backup.preview
+    }
+
+    private fun parseBackup(json: String): LedgerBackupPayload {
+        val root = JSONObject(json)
+        val manifest = root.getJSONObject("manifest")
+        require(manifest.getString("format") == "memoise-personal-ledger") {
+            "This file is not a Memoise ledger export."
+        }
+        require(manifest.getInt("backupSchemaVersion") == 1) {
+            "This backup format is not supported by this version of Memoise."
+        }
+        val data = root.getJSONObject("data")
+        val integrity = manifest.getJSONObject("integrity")
+        require(integrity.getString("algorithm") == "SHA-256") {
+            "This backup uses an unsupported integrity check."
+        }
+        val actualDigest = MessageDigest.getInstance("SHA-256")
+            .digest(data.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it) }
+        require(actualDigest.equals(integrity.getString("digest"), ignoreCase = true)) {
+            "This backup is incomplete or has been changed."
+        }
+
+        val entries = data.getJSONArray("entries").objects().map { row ->
+            EntryEntity(
+                id = row.getString("id"),
+                title = row.getString("title"),
+                type = row.nullableString("type")?.let(EntryType::valueOf),
+                status = EntryStatus.valueOf(row.getString("status")),
+                scheduledDate = row.nullableString("scheduledDate")?.let(LocalDate::parse),
+                scheduledTime = row.nullableString("scheduledTime")?.let(LocalTime::parse),
+                descriptiveEndDate = row.nullableString("descriptiveEndDate")?.let(LocalDate::parse),
+                datePurpose = DatePurpose.valueOf(row.getString("datePurpose")),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+                completedAt = row.nullableLong("completedAt"),
+                recurrenceSeriesId = row.nullableString("recurrenceSeriesId"),
+                sourceEntryId = row.nullableString("sourceEntryId"),
+                sourceContentId = row.nullableString("sourceContentId"),
+            )
+        }
+        val relationships = data.getJSONArray("relationships").objects().map { row ->
+            EntryRelationshipEntity(
+                id = row.getString("id"),
+                sourceEntryId = row.getString("sourceEntryId"),
+                targetEntryId = row.getString("targetEntryId"),
+                relationshipType = RelationshipType.valueOf(row.getString("type")),
+                createdAt = row.getLong("createdAt"),
+            )
+        }
+        val descriptionBlocks = data.getJSONArray("descriptionBlocks").objects().map { row ->
+            EntryDescriptionBlockEntity(
+                id = row.getString("id"),
+                entryId = row.getString("entryId"),
+                content = row.getString("content"),
+                sortOrder = row.getInt("sortOrder"),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+            )
+        }
+        val checklistItems = data.getJSONArray("checklistItems").objects().map { row ->
+            EntryChecklistEntity(
+                id = row.getString("id"),
+                entryId = row.getString("entryId"),
+                title = row.getString("title"),
+                completed = row.getBoolean("completed"),
+                sortOrder = row.getInt("sortOrder"),
+                linkedEntryId = row.nullableString("linkedEntryId"),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+            )
+        }
+        val notes = data.getJSONArray("notes").objects().map { row ->
+            EntryNoteEntity(
+                id = row.getString("id"),
+                entryId = row.getString("entryId"),
+                content = row.getString("content"),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+            )
+        }
+        val activities = data.getJSONArray("activityHistory").objects().map { row ->
+            EntryActivityEntity(
+                id = row.getString("id"),
+                entryId = row.getString("entryId"),
+                action = row.getString("action"),
+                details = row.nullableString("details"),
+                occurredAt = row.getLong("occurredAt"),
+            )
+        }
+        val reminders = data.getJSONArray("reminders").objects().map { row ->
+            EntryReminderEntity(
+                id = row.getString("id"),
+                entryId = row.getString("entryId"),
+                triggerAt = row.getLong("triggerAt"),
+                enabled = row.getBoolean("enabled"),
+                relativeOffsetDays = row.nullableInt("relativeOffsetDays"),
+                relativeMinuteOfDay = row.nullableInt("relativeMinuteOfDay"),
+                parentReminderId = row.nullableString("parentReminderId"),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+            )
+        }
+        val recurrenceSeries = data.getJSONArray("recurrenceSeries").objects().map { row ->
+            RecurrenceSeriesEntity(
+                id = row.getString("id"),
+                ruleJson = row.getJSONObject("rule").toString(),
+                startsOn = LocalDate.parse(row.getString("startsOn")).toEpochDay(),
+                endsOn = row.nullableString("endsOn")?.let(LocalDate::parse)?.toEpochDay(),
+                timeZoneId = row.getString("timeZoneId"),
+                active = row.getBoolean("active"),
+                createdAt = row.getLong("createdAt"),
+                updatedAt = row.getLong("updatedAt"),
+            )
+        }
+
+        val entryIds = entries.map(EntryEntity::id).toSet()
+        val seriesIds = recurrenceSeries.map(RecurrenceSeriesEntity::id).toSet()
+        requireUniqueRecords(entries, EntryEntity::id)
+        requireUniqueRecords(relationships, EntryRelationshipEntity::id)
+        requireUniqueRecords(descriptionBlocks, EntryDescriptionBlockEntity::id)
+        requireUniqueRecords(checklistItems, EntryChecklistEntity::id)
+        requireUniqueRecords(notes, EntryNoteEntity::id)
+        requireUniqueRecords(activities, EntryActivityEntity::id)
+        requireUniqueRecords(reminders, EntryReminderEntity::id)
+        requireUniqueRecords(recurrenceSeries, RecurrenceSeriesEntity::id)
+        require(entries.all { it.title.isNotBlank() }) {
+            "This backup contains an entry with no title."
+        }
+        require(entryIds.size == entries.size && seriesIds.size == recurrenceSeries.size) {
+            "This backup contains duplicate records."
+        }
+        require(entries.all { it.recurrenceSeriesId == null || it.recurrenceSeriesId in seriesIds }) {
+            "This backup refers to a missing repeat rule."
+        }
+        require(relationships.all { it.sourceEntryId in entryIds && it.targetEntryId in entryIds }) {
+            "This backup contains a link to a missing entry."
+        }
+        require(relationships.none { it.sourceEntryId == it.targetEntryId }) {
+            "This backup contains a link from an entry to itself."
+        }
+        require(descriptionBlocks.all { it.entryId in entryIds } && notes.all { it.entryId in entryIds } &&
+            activities.all { it.entryId in entryIds } && reminders.all { it.entryId in entryIds }
+        ) { "This backup contains details for a missing entry." }
+        require(checklistItems.all {
+            it.entryId in entryIds && (it.linkedEntryId == null || it.linkedEntryId in entryIds)
+        }) { "This backup contains a checklist link to a missing entry." }
+        require(reminders.all { it.parentReminderId == null || reminders.any { parent -> parent.id == it.parentReminderId } }) {
+            "This backup contains a reminder that refers to a missing reminder."
+        }
+        val relationshipKeys = relationships.map { "${it.sourceEntryId}|${it.targetEntryId}|${it.relationshipType}" }
+        require(relationshipKeys.toSet().size == relationshipKeys.size) {
+            "This backup contains duplicate links."
+        }
+
+        val preview = LedgerRestorePreview(
+            entryCount = entries.size,
+            relationshipCount = relationships.size,
+            exportedAt = manifest.getString("exportedAt"),
+        )
+        return LedgerBackupPayload(
+            preview = preview,
+            entries = entries,
+            relationships = relationships,
+            descriptionBlocks = descriptionBlocks,
+            checklistItems = checklistItems,
+            notes = notes,
+            activities = activities,
+            reminders = reminders,
+            recurrenceSeries = recurrenceSeries,
+        )
     }
 
     override fun searchEntries(
@@ -995,6 +1207,36 @@ private fun LedgerEntry.toEntity() = EntryEntity(
 private fun JSONObject.putNullable(name: String, value: Any?) {
     put(name, value ?: JSONObject.NULL)
 }
+
+private fun JSONObject.nullableString(name: String): String? =
+    if (isNull(name)) null else getString(name)
+
+private fun JSONObject.nullableLong(name: String): Long? =
+    if (isNull(name)) null else getLong(name)
+
+private fun JSONObject.nullableInt(name: String): Int? =
+    if (isNull(name)) null else getInt(name)
+
+private fun JSONArray.objects(): List<JSONObject> =
+    List(length()) { index -> getJSONObject(index) }
+
+private fun <T, K> requireUniqueRecords(records: List<T>, key: (T) -> K) {
+    require(records.map(key).toSet().size == records.size) {
+        "This backup contains duplicate records."
+    }
+}
+
+private data class LedgerBackupPayload(
+    val preview: LedgerRestorePreview,
+    val entries: List<EntryEntity>,
+    val relationships: List<EntryRelationshipEntity>,
+    val descriptionBlocks: List<EntryDescriptionBlockEntity>,
+    val checklistItems: List<EntryChecklistEntity>,
+    val notes: List<EntryNoteEntity>,
+    val activities: List<EntryActivityEntity>,
+    val reminders: List<EntryReminderEntity>,
+    val recurrenceSeries: List<RecurrenceSeriesEntity>,
+)
 
 private fun EntryRelationshipEntity.toDomain() = LedgerRelationship(
     id = id,
