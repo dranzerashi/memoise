@@ -89,7 +89,7 @@ private const val OVERDUE_ROUTE = "overdue"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
 private const val RELATED_CAPTURE_ROUTE =
-    "related-capture/{parentId}/{relationshipType}?sourceContentId={sourceContentId}"
+    "related-capture/{parentId}/{relationshipType}?sourceContentId={sourceContentId}&sourceChecklistItemId={sourceChecklistItemId}"
 
 private enum class PrimaryDestination(val route: String, val label: String, val glyph: String) {
     TIMELINE(TIMELINE_ROUTE, "Timeline", "◷"),
@@ -220,6 +220,11 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                                 "related-capture/${entry.id}/${type.name}?sourceContentId=${block.id}",
                             )
                         },
+                        onConvertChecklistItem = { type, item ->
+                            navController.navigate(
+                                "related-capture/${entry.id}/${type.name}?sourceChecklistItemId=${item.id}",
+                            )
+                        },
                         onDelete = {
                             viewModel.delete(entry)
                             navController.popBackStack()
@@ -252,12 +257,18 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         nullable = true
                         defaultValue = null
                     },
+                    navArgument("sourceChecklistItemId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
                 ),
             ) { routeEntry ->
                 val parentId = routeEntry.arguments?.getString("parentId")
                 val type = routeEntry.arguments?.getString("relationshipType")
                     ?.let { value -> runCatching { RelationshipType.valueOf(value) }.getOrNull() }
                 val sourceContentId = routeEntry.arguments?.getString("sourceContentId")
+                val sourceChecklistItemId = routeEntry.arguments?.getString("sourceChecklistItemId")
                 val parent = entries.firstOrNull { it.id == parentId }
                 if (parent == null || type == null) {
                     MissingEntryScreen(onBack = { navController.popBackStack() })
@@ -266,13 +277,24 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         viewModel.descriptionBlocksFor(parent.id)
                     }.collectAsState(initial = emptyList())
                     val sourceBlock = descriptionBlocks.firstOrNull { it.id == sourceContentId }
+                    val checklist by remember(parent.id) {
+                        viewModel.checklistFor(parent.id)
+                    }.collectAsState(initial = emptyList())
+                    val sourceChecklistItem = checklist.firstOrNull { it.id == sourceChecklistItemId }
                     CaptureScreen(
                         heading = type.creationLabel(),
                         contextLabel = "For ${parent.title}",
-                        initialTitle = sourceBlock?.content.orEmpty(),
+                        initialTitle = sourceBlock?.content ?: sourceChecklistItem?.title.orEmpty(),
                         onCancel = { navController.popBackStack() },
                         onSave = { title, date ->
-                            viewModel.createRelated(parent.id, type, title, date, sourceContentId)
+                            viewModel.createRelated(
+                                parent.id,
+                                type,
+                                title,
+                                date,
+                                sourceContentId,
+                                sourceChecklistItemId,
+                            )
                             navController.popBackStack()
                         },
                     )
@@ -755,6 +777,7 @@ private fun EntryDetailScreen(
     onUpdateDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onDeleteDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onConvertDescriptionBlock: (RelationshipType, LedgerDescriptionBlock) -> Unit,
+    onConvertChecklistItem: (RelationshipType, LedgerChecklistItem) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -858,9 +881,12 @@ private fun EntryDetailScreen(
                 ChecklistSection(
                     entryId = entry.id,
                     items = checklist,
+                    entries = entries,
                     onAdd = onAddChecklistItem,
                     onUpdate = onUpdateChecklistItem,
                     onDelete = onDeleteChecklistItem,
+                    onConvert = onConvertChecklistItem,
+                    onOpenEntry = onOpenEntry,
                 )
                 Spacer(Modifier.height(32.dp))
                 Box(
@@ -1146,9 +1172,12 @@ private fun DescriptionBlockRow(
 private fun ChecklistSection(
     entryId: String,
     items: List<LedgerChecklistItem>,
+    entries: List<LedgerEntry>,
     onAdd: (String, String) -> Unit,
     onUpdate: (LedgerChecklistItem) -> Unit,
     onDelete: (LedgerChecklistItem) -> Unit,
+    onConvert: (RelationshipType, LedgerChecklistItem) -> Unit,
+    onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var draft by rememberSaveable(entryId) { mutableStateOf("") }
     Column {
@@ -1161,7 +1190,14 @@ private fun ChecklistSection(
             )
         } else {
             items.forEach { item ->
-                ChecklistRow(item = item, onUpdate = onUpdate, onDelete = onDelete)
+                ChecklistRow(
+                    item = item,
+                    linkedEntry = entries.firstOrNull { it.id == item.linkedEntryId },
+                    onUpdate = onUpdate,
+                    onDelete = onDelete,
+                    onConvert = onConvert,
+                    onOpenEntry = onOpenEntry,
+                )
             }
         }
         Row(
@@ -1190,47 +1226,89 @@ private fun ChecklistSection(
 @Composable
 private fun ChecklistRow(
     item: LedgerChecklistItem,
+    linkedEntry: LedgerEntry?,
     onUpdate: (LedgerChecklistItem) -> Unit,
     onDelete: (LedgerChecklistItem) -> Unit,
+    onConvert: (RelationshipType, LedgerChecklistItem) -> Unit,
+    onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var menuExpanded by remember(item.id) { mutableStateOf(false) }
     var editDialogVisible by rememberSaveable(item.id) { mutableStateOf(false) }
     var editTitle by rememberSaveable(item.id) { mutableStateOf(item.title) }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = item.completed,
-            onCheckedChange = { onUpdate(item.copy(completed = it)) },
-        )
-        Text(
-            text = item.title,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None,
-            ),
-            color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onSurface,
-        )
-        Box {
-            TextButton(onClick = { menuExpanded = true }) { Text("•••") }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("Edit") },
-                    onClick = {
-                        menuExpanded = false
-                        editTitle = item.title
-                        editDialogVisible = true
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete") },
-                    onClick = {
-                        menuExpanded = false
-                        onDelete(item)
-                    },
-                )
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = item.completed,
+                onCheckedChange = { onUpdate(item.copy(completed = it)) },
+            )
+            Text(
+                text = item.title,
+                modifier = Modifier
+                    .weight(1f)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { menuExpanded = true },
+                    ),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None,
+                ),
+                color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurface,
+            )
+            Box {
+                TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (linkedEntry == null) {
+                        DropdownMenuItem(
+                            text = { Text("Create preparation") },
+                            onClick = {
+                                menuExpanded = false
+                                onConvert(RelationshipType.PREPARATION, item)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Create follow-up") },
+                            onClick = {
+                                menuExpanded = false
+                                onConvert(RelationshipType.FOLLOW_UP, item)
+                            },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Open linked entry") },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenEntry(linkedEntry)
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Edit") },
+                        onClick = {
+                            menuExpanded = false
+                            editTitle = item.title
+                            editDialogVisible = true
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete") },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete(item)
+                        },
+                    )
+                }
+            }
+        }
+        if (linkedEntry != null) {
+            TextButton(
+                onClick = { onOpenEntry(linkedEntry) },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Linked to ${linkedEntry.title}")
             }
         }
     }

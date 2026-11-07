@@ -62,3 +62,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Description paragraph actions
 
 - The description context menu supports creating preparations/follow-ups, opening a linked entry, editing, and removing a paragraph. Current link cardinality is recorded as decision D-001.
+
+## 2026-11-07 — Checklist item conversion
+
+- Long-pressing a checklist item can create a preparation or follow-up with the item title prefilled. The original item retains a single link to the generated entry, and both records are saved with the relationship in one transaction.

@@ -34,7 +34,12 @@ interface EntryRepository {
     suspend fun create(entry: LedgerEntry)
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
-    suspend fun createRelated(parentId: String, type: RelationshipType, entry: LedgerEntry)
+    suspend fun createRelated(
+        parentId: String,
+        type: RelationshipType,
+        entry: LedgerEntry,
+        sourceChecklistItemId: String? = null,
+    )
     suspend fun addChecklistItem(entryId: String, title: String)
     suspend fun updateChecklistItem(item: LedgerChecklistItem)
     suspend fun deleteChecklistItem(itemId: String)
@@ -103,10 +108,23 @@ class RoomEntryRepository @Inject constructor(
         }
     }
 
-    override suspend fun createRelated(parentId: String, type: RelationshipType, entry: LedgerEntry) {
+    override suspend fun createRelated(
+        parentId: String,
+        type: RelationshipType,
+        entry: LedgerEntry,
+        sourceChecklistItemId: String?,
+    ) {
         require(parentId != entry.id) { "An entry cannot be related to itself." }
         database.withTransaction {
             check(entryDao.findId(parentId) != null) { "The source entry no longer exists." }
+            val sourceChecklistItem = sourceChecklistItemId?.let { id ->
+                val item = checklistDao.findById(id)
+                check(item != null && item.entryId == parentId) {
+                    "The source checklist item no longer exists."
+                }
+                check(item.linkedEntryId == null) { "This checklist item already has a linked entry." }
+                item
+            }
             if (type != RelationshipType.RELATED) ensureNoCycle(parentId, entry.id)
             entryDao.upsert(entry.toEntity())
             relationshipDao.insert(
@@ -118,6 +136,19 @@ class RoomEntryRepository @Inject constructor(
                     createdAt = System.currentTimeMillis(),
                 ),
             )
+            if (sourceChecklistItem != null) {
+                checklistDao.upsert(
+                    sourceChecklistItem.copy(
+                        linkedEntryId = entry.id,
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+                recordActivity(
+                    parentId,
+                    "Checklist item linked",
+                    "${sourceChecklistItem.title} → ${entry.title}",
+                )
+            }
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
             recordActivity(parentId, "${type.activityLabel()} added", entry.title)
         }

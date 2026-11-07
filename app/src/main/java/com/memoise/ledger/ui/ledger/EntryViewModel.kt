@@ -41,14 +41,18 @@ class EntryViewModel @Inject constructor(
         title: String,
         scheduledDate: LocalDate?,
         sourceContentId: String? = null,
+        sourceChecklistItemId: String? = null,
     ) {
+        val sourceId = sourceContentId ?: sourceChecklistItemId
         val entry = newEntry(
             title = title,
             scheduledDate = scheduledDate,
-            sourceEntryId = if (sourceContentId != null) parentId else null,
-            sourceContentId = sourceContentId,
+            sourceEntryId = if (sourceId != null) parentId else null,
+            sourceContentId = sourceId,
         ) ?: return
-        viewModelScope.launch { repository.createRelated(parentId, type, entry) }
+        viewModelScope.launch {
+            repository.createRelated(parentId, type, entry, sourceChecklistItemId)
+        }
     }
 
     fun relationshipsFor(entryId: String) = repository.observeRelationships(entryId)
