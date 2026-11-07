@@ -10,7 +10,7 @@ Entry details also support ordered checklist items with add, edit, completion, a
 
 The timeline, Unscheduled, and Overdue views use the same entry records. Quick capture requires only a title and can optionally include a date. Entry details support title/date editing, date purpose, status, completion time, and deletion. Events remain out of the Overdue view, and completed entries keep their scheduled date.
 
-The presentation guides the visual language with warm paper surfaces, serif display type, olive timeline marks, and restrained terracotta accents. Search, relationships, structured descriptions, reminders, recurrence, and backup are later milestones.
+The presentation guides the visual language with warm paper surfaces, serif display type, olive timeline marks, and restrained terracotta accents. Search, structured description blocks, notes, reminders, recurrence, and backup are later milestones.
 
 ## Android configuration
 
@@ -21,3 +21,10 @@ The presentation guides the visual language with warm paper surfaces, serif disp
 - Java 17
 
 Open the project directory in Android Studio and run the `app` configuration, or build a debug APK with `./gradlew assembleDebug`.
+
+## Documentation
+
+- [Product requirements and technical specification](docs/product-requirements.md)
+- [UI/UX design and screen layout specification](docs/ui-ux-specification.md)
+- [Append-only progress log](docs/progress.md)
+- [Almanac design reference PDF](docs/references/Memoise%20Personal%20Ledger.pdf)
