@@ -3,6 +3,7 @@ package com.memoise.ledger.ui.ledger
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -87,7 +88,8 @@ private const val UNSCHEDULED_ROUTE = "unscheduled"
 private const val OVERDUE_ROUTE = "overdue"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
-private const val RELATED_CAPTURE_ROUTE = "related-capture/{parentId}/{relationshipType}"
+private const val RELATED_CAPTURE_ROUTE =
+    "related-capture/{parentId}/{relationshipType}?sourceContentId={sourceContentId}"
 
 private enum class PrimaryDestination(val route: String, val label: String, val glyph: String) {
     TIMELINE(TIMELINE_ROUTE, "Timeline", "◷"),
@@ -213,6 +215,11 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         onAddDescriptionBlock = viewModel::addDescriptionBlock,
                         onUpdateDescriptionBlock = viewModel::updateDescriptionBlock,
                         onDeleteDescriptionBlock = viewModel::deleteDescriptionBlock,
+                        onConvertDescriptionBlock = { type, block ->
+                            navController.navigate(
+                                "related-capture/${entry.id}/${type.name}?sourceContentId=${block.id}",
+                            )
+                        },
                         onDelete = {
                             viewModel.delete(entry)
                             navController.popBackStack()
@@ -240,21 +247,32 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                 arguments = listOf(
                     navArgument("parentId") { type = NavType.StringType },
                     navArgument("relationshipType") { type = NavType.StringType },
+                    navArgument("sourceContentId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
                 ),
             ) { routeEntry ->
                 val parentId = routeEntry.arguments?.getString("parentId")
                 val type = routeEntry.arguments?.getString("relationshipType")
                     ?.let { value -> runCatching { RelationshipType.valueOf(value) }.getOrNull() }
+                val sourceContentId = routeEntry.arguments?.getString("sourceContentId")
                 val parent = entries.firstOrNull { it.id == parentId }
                 if (parent == null || type == null) {
                     MissingEntryScreen(onBack = { navController.popBackStack() })
                 } else {
+                    val descriptionBlocks by remember(parent.id) {
+                        viewModel.descriptionBlocksFor(parent.id)
+                    }.collectAsState(initial = emptyList())
+                    val sourceBlock = descriptionBlocks.firstOrNull { it.id == sourceContentId }
                     CaptureScreen(
                         heading = type.creationLabel(),
                         contextLabel = "For ${parent.title}",
+                        initialTitle = sourceBlock?.content.orEmpty(),
                         onCancel = { navController.popBackStack() },
                         onSave = { title, date ->
-                            viewModel.createRelated(parent.id, type, title, date)
+                            viewModel.createRelated(parent.id, type, title, date, sourceContentId)
                             navController.popBackStack()
                         },
                     )
@@ -624,10 +642,11 @@ private fun EmptyLedgerState(
 private fun CaptureScreen(
     heading: String,
     contextLabel: String? = null,
+    initialTitle: String = "",
     onCancel: () -> Unit,
     onSave: (String, LocalDate?) -> Unit,
 ) {
-    var title by rememberSaveable { mutableStateOf("") }
+    var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -735,6 +754,7 @@ private fun EntryDetailScreen(
     onAddDescriptionBlock: (String, String) -> Unit,
     onUpdateDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onDeleteDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
+    onConvertDescriptionBlock: (RelationshipType, LedgerDescriptionBlock) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -825,10 +845,13 @@ private fun EntryDetailScreen(
                 Spacer(Modifier.height(22.dp))
                 DescriptionSection(
                     entryId = entry.id,
+                    entries = entries,
                     blocks = descriptionBlocks,
                     onAdd = onAddDescriptionBlock,
                     onUpdate = onUpdateDescriptionBlock,
                     onDelete = onDeleteDescriptionBlock,
+                    onConvert = { type, block -> onConvertDescriptionBlock(type, block) },
+                    onOpenEntry = onOpenEntry,
                 )
                 Spacer(Modifier.height(22.dp))
                 SectionLabel("ACTIONS")
@@ -929,10 +952,13 @@ private fun EntryDetailScreen(
 @Composable
 private fun DescriptionSection(
     entryId: String,
+    entries: List<LedgerEntry>,
     blocks: List<LedgerDescriptionBlock>,
     onAdd: (String, String) -> Unit,
     onUpdate: (LedgerDescriptionBlock) -> Unit,
     onDelete: (LedgerDescriptionBlock) -> Unit,
+    onConvert: (RelationshipType, LedgerDescriptionBlock) -> Unit,
+    onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var draft by rememberSaveable(entryId) { mutableStateOf("") }
     Column {
@@ -948,8 +974,13 @@ private fun DescriptionSection(
             blocks.forEach { block ->
                 DescriptionBlockRow(
                     block = block,
+                    linkedEntry = entries.firstOrNull {
+                        it.sourceEntryId == entryId && it.sourceContentId == block.id
+                    },
                     onUpdate = onUpdate,
                     onDelete = onDelete,
+                    onConvert = onConvert,
+                    onOpenEntry = onOpenEntry,
                 )
             }
         }
@@ -978,12 +1009,16 @@ private fun DescriptionSection(
 @Composable
 private fun DescriptionBlockRow(
     block: LedgerDescriptionBlock,
+    linkedEntry: LedgerEntry?,
     onUpdate: (LedgerDescriptionBlock) -> Unit,
     onDelete: (LedgerDescriptionBlock) -> Unit,
+    onConvert: (RelationshipType, LedgerDescriptionBlock) -> Unit,
+    onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var editing by rememberSaveable(block.id) { mutableStateOf(false) }
     var draft by rememberSaveable(block.id) { mutableStateOf(block.content) }
     var confirmDelete by rememberSaveable(block.id) { mutableStateOf(false) }
+    var linkMenuExpanded by remember(block.id) { mutableStateOf(false) }
     LaunchedEffect(block.content, editing) {
         if (!editing) draft = block.content
     }
@@ -1025,13 +1060,67 @@ private fun DescriptionBlockRow(
         ) {
             Text(
                 text = block.content,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { linkMenuExpanded = true },
+                    ),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            TextButton(onClick = { editing = true }) { Text("Edit") }
-            TextButton(onClick = { confirmDelete = true }) {
-                Text("Remove", color = MaterialTheme.colorScheme.error)
+            DropdownMenu(
+                expanded = linkMenuExpanded,
+                onDismissRequest = { linkMenuExpanded = false },
+            ) {
+                if (linkedEntry == null) {
+                    DropdownMenuItem(
+                        text = { Text("Create preparation") },
+                        onClick = {
+                            linkMenuExpanded = false
+                            onConvert(RelationshipType.PREPARATION, block)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Create follow-up") },
+                        onClick = {
+                            linkMenuExpanded = false
+                            onConvert(RelationshipType.FOLLOW_UP, block)
+                        },
+                    )
+                } else {
+                    DropdownMenuItem(
+                        text = { Text("Open linked entry") },
+                        onClick = {
+                            linkMenuExpanded = false
+                            onOpenEntry(linkedEntry)
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Edit paragraph") },
+                    onClick = {
+                        linkMenuExpanded = false
+                        editing = true
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Remove paragraph", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        linkMenuExpanded = false
+                        confirmDelete = true
+                    },
+                )
+            }
+        }
+        if (linkedEntry != null && !editing) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { onOpenEntry(linkedEntry) }) {
+                    Text("Linked to ${linkedEntry.title}")
+                }
             }
         }
     }

@@ -47,3 +47,18 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 
 - The user installed and verified the structured description paragraph build on their Pixel and confirmed it is working.
 - This verified checkpoint is ready to commit and push before the next feature.
+
+## 2026-11-07 — Description paragraph conversion
+
+- Long-pressing a description paragraph now offers creation as a preparation or follow-up. The paragraph text fills the new entry title, the original paragraph remains unchanged, and the created entry stores stable source-entry and source-content references.
+- The original entry shows a link to the created entry. Relationship creation continues to use the existing transactional path; no new schema migration was needed.
+- `./gradlew assembleDebug` completed successfully. This build is ready for Pixel verification; device confirmation is pending. Converting only part of a selected paragraph remains future work.
+
+## 2026-11-07 — Description paragraph action menu
+
+- Moved paragraph Edit and Remove into the long-press context menu alongside relationship creation and linked-entry navigation. Removed the separate row buttons; Remove still asks for confirmation.
+- `./gradlew assembleDebug` completed successfully. The adjusted menu build is ready for Pixel verification; device confirmation is pending.
+
+## 2026-11-07 — Description paragraph actions
+
+- The description context menu supports creating preparations/follow-ups, opening a linked entry, editing, and removing a paragraph. Current link cardinality is recorded as decision D-001.

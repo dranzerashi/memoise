@@ -40,8 +40,14 @@ class EntryViewModel @Inject constructor(
         type: RelationshipType,
         title: String,
         scheduledDate: LocalDate?,
+        sourceContentId: String? = null,
     ) {
-        val entry = newEntry(title, scheduledDate) ?: return
+        val entry = newEntry(
+            title = title,
+            scheduledDate = scheduledDate,
+            sourceEntryId = if (sourceContentId != null) parentId else null,
+            sourceContentId = sourceContentId,
+        ) ?: return
         viewModelScope.launch { repository.createRelated(parentId, type, entry) }
     }
 
@@ -97,7 +103,12 @@ class EntryViewModel @Inject constructor(
         viewModelScope.launch { repository.delete(entry.id) }
     }
 
-    private fun newEntry(title: String, scheduledDate: LocalDate?): LedgerEntry? {
+    private fun newEntry(
+        title: String,
+        scheduledDate: LocalDate?,
+        sourceEntryId: String? = null,
+        sourceContentId: String? = null,
+    ): LedgerEntry? {
         val cleanTitle = title.trim()
         if (cleanTitle.isBlank()) return null
         val now = System.currentTimeMillis()
@@ -105,6 +116,8 @@ class EntryViewModel @Inject constructor(
             id = UUID.randomUUID().toString(),
             title = cleanTitle,
             scheduledDate = scheduledDate,
+            sourceEntryId = sourceEntryId,
+            sourceContentId = sourceContentId,
             createdAt = now,
             updatedAt = now,
         )
