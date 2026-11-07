@@ -56,6 +56,15 @@ data class LedgerActivity(
     val occurredAt: Long,
 )
 
+data class LedgerDescriptionBlock(
+    val id: String,
+    val entryId: String,
+    val content: String,
+    val sortOrder: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 data class LedgerEntry(
     val id: String,
     val title: String,

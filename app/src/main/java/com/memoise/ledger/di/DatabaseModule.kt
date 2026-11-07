@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.memoise.ledger.data.database.EntryDao
 import com.memoise.ledger.data.database.EntryActivityDao
 import com.memoise.ledger.data.database.EntryChecklistDao
+import com.memoise.ledger.data.database.EntryDescriptionBlockDao
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.MemoiseDatabase
 import com.memoise.ledger.data.repository.EntryRepository
@@ -28,7 +29,11 @@ object DatabaseModule {
         context,
         MemoiseDatabase::class.java,
         "memoise-ledger.db",
-    ).addMigrations(MemoiseDatabase.MIGRATION_1_2, MemoiseDatabase.MIGRATION_2_3).build()
+    ).addMigrations(
+        MemoiseDatabase.MIGRATION_1_2,
+        MemoiseDatabase.MIGRATION_2_3,
+        MemoiseDatabase.MIGRATION_3_4,
+    ).build()
 
     @Provides
     fun provideEntryDao(database: MemoiseDatabase): EntryDao = database.entryDao()
@@ -44,6 +49,10 @@ object DatabaseModule {
     @Provides
     fun provideEntryActivityDao(database: MemoiseDatabase): EntryActivityDao =
         database.entryActivityDao()
+
+    @Provides
+    fun provideEntryDescriptionBlockDao(database: MemoiseDatabase): EntryDescriptionBlockDao =
+        database.entryDescriptionBlockDao()
 }
 
 @Module

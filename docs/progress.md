@@ -36,3 +36,14 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Visual reference added
 
 - Added the provided [Memoise Personal Ledger PDF](references/Memoise%20Personal%20Ledger.pdf) as the almanac-style visual reference. It informs design choices but does not override the product requirements or UI/UX specification.
+
+## 2026-11-07 — Structured description paragraphs
+
+- Added ordered description paragraphs to entry details. Paragraphs have stable IDs and support adding, editing, and removing while preserving their order.
+- Added a Room `entry_description_blocks` table and non-destructive migration from schema version 3 to 4. Paragraph changes are recorded in entry activity history.
+- `./gradlew assembleDebug` completed successfully. The updated build is ready for Pixel verification; device confirmation is pending. No automated test suite was run.
+
+## 2026-11-07 — Pixel verification
+
+- The user installed and verified the structured description paragraph build on their Pixel and confirmed it is working.
+- This verified checkpoint is ready to commit and push before the next feature.

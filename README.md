@@ -6,7 +6,7 @@ Memoise is a native, local-first personal ledger for Android.
 
 The app saves entries and relationships locally with Room. Preparations, follow-ups, and related entries can be created from an entry, then opened from either side of the connection. Relationship and entry creation share a database transaction, directed preparation/follow-up loops are checked, and entry deletion cascades to its links. The Room schema has a non-destructive migration from the previous build.
 
-Entry details also support ordered checklist items with add, edit, completion, and delete actions. A compact activity history records entry creation, status changes, relationship creation, and checklist changes. These additions use a second non-destructive Room migration.
+Entry details support ordered description paragraphs with stable IDs and add, edit, and remove actions, plus ordered checklist items with add, edit, completion, and delete actions. A compact activity history records entry creation, status changes, relationship creation, and checklist changes. These additions use a second non-destructive Room migration.
 
 The timeline, Unscheduled, and Overdue views use the same entry records. Quick capture requires only a title and can optionally include a date. Entry details support title/date editing, date purpose, status, completion time, and deletion. Events remain out of the Overdue view, and completed entries keep their scheduled date.
 

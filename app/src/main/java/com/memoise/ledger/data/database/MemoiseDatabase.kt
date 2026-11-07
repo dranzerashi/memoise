@@ -12,8 +12,9 @@ import androidx.room.TypeConverters
         EntryRelationshipEntity::class,
         EntryChecklistEntity::class,
         EntryActivityEntity::class,
+        EntryDescriptionBlockEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -22,6 +23,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryRelationshipDao(): EntryRelationshipDao
     abstract fun entryChecklistDao(): EntryChecklistDao
     abstract fun entryActivityDao(): EntryActivityDao
+    abstract fun entryDescriptionBlockDao(): EntryDescriptionBlockDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -86,6 +88,26 @@ abstract class MemoiseDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_entry_activities_entryId_occurredAt` ON `entry_activities` (`entryId`, `occurredAt`)",
+                )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `entry_description_blocks` (
+                        `id` TEXT NOT NULL,
+                        `entryId` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `sortOrder` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`entryId`) REFERENCES `ledger_entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_entry_description_blocks_entryId_sortOrder` ON `entry_description_blocks` (`entryId`, `sortOrder`)",
                 )
             }
         }

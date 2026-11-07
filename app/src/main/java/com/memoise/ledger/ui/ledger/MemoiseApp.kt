@@ -74,6 +74,7 @@ import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
+import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import java.time.LocalDate
@@ -193,18 +194,25 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     val activities by remember(entry.id) {
                         viewModel.activitiesFor(entry.id)
                     }.collectAsState(initial = emptyList())
+                    val descriptionBlocks by remember(entry.id) {
+                        viewModel.descriptionBlocksFor(entry.id)
+                    }.collectAsState(initial = emptyList())
                     EntryDetailScreen(
                         entry = entry,
                         entries = entries,
                         relationships = relationships,
                         checklist = checklist,
                         activities = activities,
+                        descriptionBlocks = descriptionBlocks,
                         onUpdate = viewModel::update,
                         onSetStatus = viewModel::setStatus,
                         onSetDatePurpose = viewModel::setDatePurpose,
                         onAddChecklistItem = viewModel::addChecklistItem,
                         onUpdateChecklistItem = viewModel::updateChecklistItem,
                         onDeleteChecklistItem = viewModel::deleteChecklistItem,
+                        onAddDescriptionBlock = viewModel::addDescriptionBlock,
+                        onUpdateDescriptionBlock = viewModel::updateDescriptionBlock,
+                        onDeleteDescriptionBlock = viewModel::deleteDescriptionBlock,
                         onDelete = {
                             viewModel.delete(entry)
                             navController.popBackStack()
@@ -717,12 +725,16 @@ private fun EntryDetailScreen(
     relationships: List<LedgerRelationship>,
     checklist: List<LedgerChecklistItem>,
     activities: List<LedgerActivity>,
+    descriptionBlocks: List<LedgerDescriptionBlock>,
     onUpdate: (LedgerEntry) -> Unit,
     onSetStatus: (LedgerEntry, EntryStatus) -> Unit,
     onSetDatePurpose: (LedgerEntry, DatePurpose) -> Unit,
     onAddChecklistItem: (String, String) -> Unit,
     onUpdateChecklistItem: (LedgerChecklistItem) -> Unit,
     onDeleteChecklistItem: (LedgerChecklistItem) -> Unit,
+    onAddDescriptionBlock: (String, String) -> Unit,
+    onUpdateDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
+    onDeleteDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -810,6 +822,14 @@ private fun EntryDetailScreen(
                         },
                     )
                 }
+                Spacer(Modifier.height(22.dp))
+                DescriptionSection(
+                    entryId = entry.id,
+                    blocks = descriptionBlocks,
+                    onAdd = onAddDescriptionBlock,
+                    onUpdate = onUpdateDescriptionBlock,
+                    onDelete = onDeleteDescriptionBlock,
+                )
                 Spacer(Modifier.height(22.dp))
                 SectionLabel("ACTIONS")
                 ChecklistSection(
@@ -901,6 +921,133 @@ private fun EntryDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmation = false }) { Text("Keep entry") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DescriptionSection(
+    entryId: String,
+    blocks: List<LedgerDescriptionBlock>,
+    onAdd: (String, String) -> Unit,
+    onUpdate: (LedgerDescriptionBlock) -> Unit,
+    onDelete: (LedgerDescriptionBlock) -> Unit,
+) {
+    var draft by rememberSaveable(entryId) { mutableStateOf("") }
+    Column {
+        SectionLabel("DESCRIPTION")
+        if (blocks.isEmpty()) {
+            Text(
+                text = "Add a little context whenever you’re ready.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+            )
+        } else {
+            blocks.forEach { block ->
+                DescriptionBlockRow(
+                    block = block,
+                    onUpdate = onUpdate,
+                    onDelete = onDelete,
+                )
+            }
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            label = { Text("Add a paragraph") },
+            minLines = 2,
+        )
+        TextButton(
+            onClick = {
+                onAdd(entryId, draft)
+                draft = ""
+            },
+            enabled = draft.isNotBlank(),
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text("Add paragraph")
+        }
+    }
+}
+
+@Composable
+private fun DescriptionBlockRow(
+    block: LedgerDescriptionBlock,
+    onUpdate: (LedgerDescriptionBlock) -> Unit,
+    onDelete: (LedgerDescriptionBlock) -> Unit,
+) {
+    var editing by rememberSaveable(block.id) { mutableStateOf(false) }
+    var draft by rememberSaveable(block.id) { mutableStateOf(block.content) }
+    var confirmDelete by rememberSaveable(block.id) { mutableStateOf(false) }
+    LaunchedEffect(block.content, editing) {
+        if (!editing) draft = block.content
+    }
+
+    if (editing) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            label = { Text("Paragraph") },
+            minLines = 2,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(
+                onClick = {
+                    draft = block.content
+                    editing = false
+                },
+            ) { Text("Cancel") }
+            TextButton(
+                onClick = {
+                    onUpdate(block.copy(content = draft))
+                    editing = false
+                },
+                enabled = draft.isNotBlank(),
+            ) { Text("Save") }
+        }
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = block.content,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            TextButton(onClick = { editing = true }) { Text("Edit") }
+            TextButton(onClick = { confirmDelete = true }) {
+                Text("Remove", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Remove this paragraph?") },
+            text = { Text("This paragraph will be removed from the entry description.") },
+            confirmButton = {
+                TextButton(onClick = { onDelete(block) }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Keep paragraph") }
             },
         )
     }
