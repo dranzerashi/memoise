@@ -1,5 +1,8 @@
 package com.memoise.ledger.data.repository
 
+import android.content.Context
+import androidx.room.withTransaction
+
 import com.memoise.ledger.data.database.EntryDao
 import com.memoise.ledger.data.database.EntryActivityDao
 import com.memoise.ledger.data.database.EntryActivityEntity
@@ -38,7 +41,6 @@ import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
-import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.util.ArrayDeque
@@ -51,12 +53,15 @@ import java.time.ZoneOffset
 import java.security.MessageDigest
 import java.util.Locale
 import com.memoise.ledger.BuildConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import org.json.JSONObject
 import org.json.JSONArray
 
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
     suspend fun exportJson(): String
+    suspend fun createDatabaseSnapshot(): File
     suspend fun inspectBackup(json: String): LedgerRestorePreview
     suspend fun restoreBackup(json: String): LedgerRestorePreview
     fun searchEntries(
@@ -114,6 +119,7 @@ interface EntryRepository {
 
 @Singleton
 class RoomEntryRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val database: MemoiseDatabase,
     private val entryDao: EntryDao,
     private val relationshipDao: EntryRelationshipDao,
@@ -125,6 +131,32 @@ class RoomEntryRepository @Inject constructor(
     private val recurrenceDao: RecurrenceSeriesDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
+    override suspend fun createDatabaseSnapshot(): File {
+        val db = database.openHelper.writableDatabase
+        val cursor = db.query("SELECT sqlite_version()")
+        val sqliteVersion = cursor.use { if (it.moveToFirst()) it.getString(0) else "0.0.0" }
+        val version = sqliteVersion.split('.')
+            .map { component -> component.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        val major = version.getOrElse(0) { 0 }
+        val minor = version.getOrElse(1) { 0 }
+        check(major > 3 || major == 3 && minor >= 27) {
+            "Complete database snapshots need a newer SQLite version. Use Export JSON instead."
+        }
+
+        val snapshot = File(context.cacheDir, "memoise-snapshot-${java.util.UUID.randomUUID()}.db")
+        val escapedPath = snapshot.absolutePath.replace("'", "''")
+        try {
+            db.execSQL("VACUUM INTO '$escapedPath'")
+            check(snapshot.isFile && snapshot.length() > 0L) {
+                "The database snapshot could not be created."
+            }
+            return snapshot
+        } catch (error: Exception) {
+            snapshot.delete()
+            throw error
+        }
+    }
+
     override suspend fun exportJson(): String = database.withTransaction {
         val backupDao = database.ledgerBackupDao()
         val data = JSONObject()

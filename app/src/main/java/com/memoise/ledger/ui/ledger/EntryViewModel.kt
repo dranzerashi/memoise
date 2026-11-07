@@ -29,6 +29,7 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +76,30 @@ class EntryViewModel @Inject constructor(
                 false
             }
             onFinished(saved)
+        }
+    }
+
+    fun exportDatabaseSnapshot(destination: Uri, onFinished: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            var snapshot: java.io.File? = null
+            try {
+                val snapshotFile = withContext(Dispatchers.IO) { repository.createDatabaseSnapshot() }
+                snapshot = snapshotFile
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(destination, "wt")
+                        ?: error("Could not open the selected file")
+                    output.use { stream -> snapshotFile.inputStream().use { it.copyTo(stream) } }
+                }
+                onFinished(true, null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onFinished(false, error.message ?: "Could not create the database backup.")
+            } finally {
+                snapshot?.let { file ->
+                    withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                }
+            }
         }
     }
 

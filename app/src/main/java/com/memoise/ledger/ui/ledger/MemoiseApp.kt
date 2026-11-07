@@ -143,6 +143,19 @@ fun MemoiseApp(viewModel: EntryViewModel) {
             }
         }
     }
+    val databaseBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.sqlite3"),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.exportDatabaseSnapshot(uri) { success, error ->
+                Toast.makeText(
+                    context,
+                    if (success) "Database backup saved" else (error ?: "Could not create the database backup"),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
     val restoreDocumentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
@@ -249,6 +262,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     onBack = { navController.popBackStack() },
                     onExportJson = {
                         exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
+                    },
+                    onCreateDatabaseBackup = {
+                        databaseBackupLauncher.launch("memoise-database-${LocalDate.now()}.db")
                     },
                     onChooseRestoreFile = {
                         restoreDocumentLauncher.launch(arrayOf("application/json", "text/json", "text/*"))
@@ -871,6 +887,7 @@ private fun SearchDateField(
 private fun SettingsScreen(
     onBack: () -> Unit,
     onExportJson: () -> Unit,
+    onCreateDatabaseBackup: () -> Unit,
     onChooseRestoreFile: () -> Unit,
     restorePreview: LedgerRestorePreview?,
     restoring: Boolean,
@@ -903,6 +920,12 @@ private fun SettingsScreen(
             enabled = !restoring,
         ) {
             Text("Restore from JSON")
+        }
+        OutlinedButton(
+            onClick = onCreateDatabaseBackup,
+            modifier = Modifier.padding(start = 26.dp, top = 8.dp),
+        ) {
+            Text("Create full backup")
         }
     }
     restorePreview?.let { preview ->

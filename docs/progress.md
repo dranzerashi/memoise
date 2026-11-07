@@ -137,3 +137,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — JSON restore
 
 - Added JSON restore with checksum, schema, duplicate, and reference validation before confirmation. Replacing the ledger runs in one Room transaction; reminders are rescheduled afterward.
+
+## 2026-11-07 — Full database backup
+
+- Added full SQLite snapshot export through the document picker. `VACUUM INTO` creates a consistent snapshot that includes committed WAL data; older SQLite versions are directed to JSON export. The debug build is ready for Pixel verification.
