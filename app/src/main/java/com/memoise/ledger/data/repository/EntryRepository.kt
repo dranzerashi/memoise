@@ -7,6 +7,8 @@ import com.memoise.ledger.data.database.EntryChecklistDao
 import com.memoise.ledger.data.database.EntryChecklistEntity
 import com.memoise.ledger.data.database.EntryDescriptionBlockDao
 import com.memoise.ledger.data.database.EntryDescriptionBlockEntity
+import com.memoise.ledger.data.database.EntryNoteDao
+import com.memoise.ledger.data.database.EntryNoteEntity
 import com.memoise.ledger.data.database.EntryEntity
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.EntryRelationshipEntity
@@ -15,6 +17,7 @@ import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
+import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.RelationshipType
@@ -31,6 +34,7 @@ interface EntryRepository {
     fun observeChecklist(entryId: String): Flow<List<LedgerChecklistItem>>
     fun observeActivities(entryId: String): Flow<List<LedgerActivity>>
     fun observeDescriptionBlocks(entryId: String): Flow<List<LedgerDescriptionBlock>>
+    fun observeNotes(entryId: String): Flow<List<LedgerNote>>
     suspend fun create(entry: LedgerEntry)
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
@@ -46,6 +50,9 @@ interface EntryRepository {
     suspend fun addDescriptionBlock(entryId: String, content: String)
     suspend fun updateDescriptionBlock(block: LedgerDescriptionBlock)
     suspend fun deleteDescriptionBlock(blockId: String)
+    suspend fun addNote(entryId: String, content: String)
+    suspend fun updateNote(note: LedgerNote)
+    suspend fun deleteNote(noteId: String)
     suspend fun delete(id: String)
 }
 
@@ -57,6 +64,7 @@ class RoomEntryRepository @Inject constructor(
     private val checklistDao: EntryChecklistDao,
     private val activityDao: EntryActivityDao,
     private val descriptionBlockDao: EntryDescriptionBlockDao,
+    private val noteDao: EntryNoteDao,
 ) : EntryRepository {
     override fun observeEntries(): Flow<List<LedgerEntry>> =
         entryDao.observeAll().map { entries -> entries.map(EntryEntity::toDomain) }
@@ -76,6 +84,9 @@ class RoomEntryRepository @Inject constructor(
         descriptionBlockDao.observeForEntry(entryId).map { blocks ->
             blocks.map(EntryDescriptionBlockEntity::toDomain)
         }
+
+    override fun observeNotes(entryId: String): Flow<List<LedgerNote>> =
+        noteDao.observeForEntry(entryId).map { notes -> notes.map(EntryNoteEntity::toDomain) }
 
     override suspend fun create(entry: LedgerEntry) {
         database.withTransaction {
@@ -251,6 +262,46 @@ class RoomEntryRepository @Inject constructor(
         }
     }
 
+    override suspend fun addNote(entryId: String, content: String) {
+        val cleanContent = content.trim()
+        if (cleanContent.isEmpty()) return
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            check(entryDao.findId(entryId) != null) { "The entry no longer exists." }
+            noteDao.upsert(
+                EntryNoteEntity(
+                    id = java.util.UUID.randomUUID().toString(),
+                    entryId = entryId,
+                    content = cleanContent,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+            recordActivity(entryId, "Note added", cleanContent.activityPreview(), now)
+        }
+    }
+
+    override suspend fun updateNote(note: LedgerNote) {
+        val cleanContent = note.content.trim()
+        if (cleanContent.isEmpty()) return
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            val existing = noteDao.findById(note.id) ?: return@withTransaction
+            check(existing.entryId == note.entryId) { "The note belongs to another entry." }
+            if (existing.content == cleanContent) return@withTransaction
+            noteDao.upsert(note.copy(content = cleanContent, updatedAt = now).toEntity())
+            recordActivity(note.entryId, "Note edited", cleanContent.activityPreview(), now)
+        }
+    }
+
+    override suspend fun deleteNote(noteId: String) {
+        database.withTransaction {
+            val existing = noteDao.findById(noteId) ?: return@withTransaction
+            noteDao.deleteById(noteId)
+            recordActivity(existing.entryId, "Note removed", existing.content.activityPreview())
+        }
+    }
+
     override suspend fun delete(id: String) {
         entryDao.deleteById(id)
     }
@@ -348,6 +399,14 @@ private fun EntryDescriptionBlockEntity.toDomain() = LedgerDescriptionBlock(
     updatedAt = updatedAt,
 )
 
+private fun EntryNoteEntity.toDomain() = LedgerNote(
+    id = id,
+    entryId = entryId,
+    content = content,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
 private fun LedgerChecklistItem.toEntity() = EntryChecklistEntity(
     id = id,
     entryId = entryId,
@@ -364,6 +423,14 @@ private fun LedgerDescriptionBlock.toEntity() = EntryDescriptionBlockEntity(
     entryId = entryId,
     content = content,
     sortOrder = sortOrder,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+private fun LedgerNote.toEntity() = EntryNoteEntity(
+    id = id,
+    entryId = entryId,
+    content = content,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
@@ -388,3 +455,6 @@ private fun RelationshipType.activityLabel(): String = when (this) {
     RelationshipType.FOLLOW_UP -> "Follow-up"
     RelationshipType.RELATED -> "Related entry"
 }
+
+private fun String.activityPreview(): String =
+    if (length <= 80) this else "${take(80)}…"

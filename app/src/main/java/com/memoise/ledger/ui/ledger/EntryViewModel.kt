@@ -9,6 +9,7 @@ import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
+import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -59,6 +60,7 @@ class EntryViewModel @Inject constructor(
     fun checklistFor(entryId: String) = repository.observeChecklist(entryId)
     fun activitiesFor(entryId: String) = repository.observeActivities(entryId)
     fun descriptionBlocksFor(entryId: String) = repository.observeDescriptionBlocks(entryId)
+    fun notesFor(entryId: String) = repository.observeNotes(entryId)
 
     fun addChecklistItem(entryId: String, title: String) {
         viewModelScope.launch { repository.addChecklistItem(entryId, title) }
@@ -82,6 +84,18 @@ class EntryViewModel @Inject constructor(
 
     fun deleteDescriptionBlock(block: LedgerDescriptionBlock) {
         viewModelScope.launch { repository.deleteDescriptionBlock(block.id) }
+    }
+
+    fun addNote(entryId: String, content: String) {
+        viewModelScope.launch { repository.addNote(entryId, content) }
+    }
+
+    fun updateNote(note: LedgerNote) {
+        viewModelScope.launch { repository.updateNote(note) }
+    }
+
+    fun deleteNote(note: LedgerNote) {
+        viewModelScope.launch { repository.deleteNote(note.id) }
     }
 
     fun update(entry: LedgerEntry) {

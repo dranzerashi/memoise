@@ -76,6 +76,7 @@ import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
+import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import java.time.LocalDate
@@ -199,6 +200,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     val descriptionBlocks by remember(entry.id) {
                         viewModel.descriptionBlocksFor(entry.id)
                     }.collectAsState(initial = emptyList())
+                    val notes by remember(entry.id) {
+                        viewModel.notesFor(entry.id)
+                    }.collectAsState(initial = emptyList())
                     EntryDetailScreen(
                         entry = entry,
                         entries = entries,
@@ -206,6 +210,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         checklist = checklist,
                         activities = activities,
                         descriptionBlocks = descriptionBlocks,
+                        notes = notes,
                         onUpdate = viewModel::update,
                         onSetStatus = viewModel::setStatus,
                         onSetDatePurpose = viewModel::setDatePurpose,
@@ -220,6 +225,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                                 "related-capture/${entry.id}/${type.name}?sourceContentId=${block.id}",
                             )
                         },
+                        onAddNote = viewModel::addNote,
+                        onUpdateNote = viewModel::updateNote,
+                        onDeleteNote = viewModel::deleteNote,
                         onConvertChecklistItems = { type, items ->
                             navController.navigate(
                                 "related-capture/${entry.id}/${type.name}?sourceChecklistItemIds=${items.joinToString(",") { it.id }}",
@@ -770,6 +778,7 @@ private fun EntryDetailScreen(
     checklist: List<LedgerChecklistItem>,
     activities: List<LedgerActivity>,
     descriptionBlocks: List<LedgerDescriptionBlock>,
+    notes: List<LedgerNote>,
     onUpdate: (LedgerEntry) -> Unit,
     onSetStatus: (LedgerEntry, EntryStatus) -> Unit,
     onSetDatePurpose: (LedgerEntry, DatePurpose) -> Unit,
@@ -781,6 +790,9 @@ private fun EntryDetailScreen(
     onDeleteDescriptionBlock: (LedgerDescriptionBlock) -> Unit,
     onConvertDescriptionBlock: (RelationshipType, LedgerDescriptionBlock) -> Unit,
     onConvertChecklistItems: (RelationshipType, List<LedgerChecklistItem>) -> Unit,
+    onAddNote: (String, String) -> Unit,
+    onUpdateNote: (LedgerNote) -> Unit,
+    onDeleteNote: (LedgerNote) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -890,6 +902,14 @@ private fun EntryDetailScreen(
                     onDelete = onDeleteChecklistItem,
                     onConvert = { type, items -> onConvertChecklistItems(type, items) },
                     onOpenEntry = onOpenEntry,
+                )
+                Spacer(Modifier.height(22.dp))
+                NotesSection(
+                    entryId = entry.id,
+                    notes = notes,
+                    onAdd = onAddNote,
+                    onUpdate = onUpdateNote,
+                    onDelete = onDeleteNote,
                 )
                 Spacer(Modifier.height(32.dp))
                 Box(
@@ -1409,6 +1429,144 @@ private fun ChecklistRow(
             },
             dismissButton = {
                 TextButton(onClick = { editDialogVisible = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NotesSection(
+    entryId: String,
+    notes: List<LedgerNote>,
+    onAdd: (String, String) -> Unit,
+    onUpdate: (LedgerNote) -> Unit,
+    onDelete: (LedgerNote) -> Unit,
+) {
+    var draft by rememberSaveable(entryId) { mutableStateOf("") }
+    Column {
+        SectionLabel("NOTES")
+        if (notes.isEmpty()) {
+            Text(
+                text = "No notes yet",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+            )
+        } else {
+            notes.forEach { note ->
+                NoteRow(note = note, onUpdate = onUpdate, onDelete = onDelete)
+            }
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            label = { Text("Add a note") },
+            minLines = 2,
+        )
+        TextButton(
+            onClick = {
+                onAdd(entryId, draft)
+                draft = ""
+            },
+            enabled = draft.isNotBlank(),
+            modifier = Modifier.align(Alignment.End),
+        ) { Text("Add note") }
+    }
+}
+
+@Composable
+private fun NoteRow(
+    note: LedgerNote,
+    onUpdate: (LedgerNote) -> Unit,
+    onDelete: (LedgerNote) -> Unit,
+) {
+    var menuExpanded by remember(note.id) { mutableStateOf(false) }
+    var editDialogVisible by rememberSaveable(note.id) { mutableStateOf(false) }
+    var deleteConfirmationVisible by rememberSaveable(note.id) { mutableStateOf(false) }
+    var draft by rememberSaveable(note.id) { mutableStateOf(note.content) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = note.content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = formatDateTime(note.createdAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        Box {
+            TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Edit note") },
+                    onClick = {
+                        menuExpanded = false
+                        draft = note.content
+                        editDialogVisible = true
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Remove note", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        menuExpanded = false
+                        deleteConfirmationVisible = true
+                    },
+                )
+            }
+        }
+    }
+
+    if (editDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { editDialogVisible = false },
+            title = { Text("Edit note") },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    minLines = 3,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onUpdate(note.copy(content = draft))
+                        editDialogVisible = false
+                    },
+                    enabled = draft.isNotBlank(),
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editDialogVisible = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (deleteConfirmationVisible) {
+        AlertDialog(
+            onDismissRequest = { deleteConfirmationVisible = false },
+            title = { Text("Remove this note?") },
+            text = { Text("This note will be removed from the entry.") },
+            confirmButton = {
+                TextButton(onClick = { onDelete(note) }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmationVisible = false }) { Text("Keep note") }
             },
         )
     }

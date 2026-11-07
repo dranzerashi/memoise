@@ -6,6 +6,7 @@ import com.memoise.ledger.data.database.EntryDao
 import com.memoise.ledger.data.database.EntryActivityDao
 import com.memoise.ledger.data.database.EntryChecklistDao
 import com.memoise.ledger.data.database.EntryDescriptionBlockDao
+import com.memoise.ledger.data.database.EntryNoteDao
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.MemoiseDatabase
 import com.memoise.ledger.data.repository.EntryRepository
@@ -33,6 +34,7 @@ object DatabaseModule {
         MemoiseDatabase.MIGRATION_1_2,
         MemoiseDatabase.MIGRATION_2_3,
         MemoiseDatabase.MIGRATION_3_4,
+        MemoiseDatabase.MIGRATION_4_5,
     ).build()
 
     @Provides
@@ -53,6 +55,9 @@ object DatabaseModule {
     @Provides
     fun provideEntryDescriptionBlockDao(database: MemoiseDatabase): EntryDescriptionBlockDao =
         database.entryDescriptionBlockDao()
+
+    @Provides
+    fun provideEntryNoteDao(database: MemoiseDatabase): EntryNoteDao = database.entryNoteDao()
 }
 
 @Module

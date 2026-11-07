@@ -65,6 +65,14 @@ data class LedgerDescriptionBlock(
     val updatedAt: Long,
 )
 
+data class LedgerNote(
+    val id: String,
+    val entryId: String,
+    val content: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
 data class LedgerEntry(
     val id: String,
     val title: String,

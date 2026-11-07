@@ -70,3 +70,8 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Multi-item checklist conversion
 
 - Checklist selection mode can convert multiple items into one preparation or follow-up. Each selected item keeps its own link to that shared entry; creation and linking are transactional.
+
+## 2026-11-07 — Entry notes
+
+- Added separate timestamped notes with add, edit, and remove actions, plus activity history entries for note changes.
+- Added the `entry_notes` Room table and non-destructive migration from schema version 4 to 5.
