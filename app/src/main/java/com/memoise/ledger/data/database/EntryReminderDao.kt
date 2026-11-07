@@ -19,6 +19,12 @@ interface EntryReminderDao {
     @Query("SELECT * FROM entry_reminders WHERE entryId = :entryId")
     suspend fun allForEntry(entryId: String): List<EntryReminderEntity>
 
+    @Query("SELECT * FROM entry_reminders WHERE parentReminderId = :parentReminderId")
+    suspend fun childrenOf(parentReminderId: String): List<EntryReminderEntity>
+
+    @Query("DELETE FROM entry_reminders WHERE parentReminderId = :parentReminderId")
+    suspend fun deleteChildrenOf(parentReminderId: String)
+
     @Upsert
     suspend fun upsert(reminder: EntryReminderEntity)
 

@@ -23,6 +23,9 @@ interface EntryDao {
     @Query("SELECT * FROM ledger_entries WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): EntryEntity?
 
+    @Query("SELECT * FROM ledger_entries WHERE recurrenceSeriesId = :seriesId")
+    suspend fun findByRecurrenceSeries(seriesId: String): List<EntryEntity>
+
     @Upsert
     suspend fun upsert(entry: EntryEntity)
 

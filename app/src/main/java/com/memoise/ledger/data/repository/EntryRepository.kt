@@ -15,6 +15,8 @@ import com.memoise.ledger.data.database.EntryEntity
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.EntryRelationshipEntity
 import com.memoise.ledger.data.database.MemoiseDatabase
+import com.memoise.ledger.data.database.RecurrenceSeriesDao
+import com.memoise.ledger.data.database.RecurrenceSeriesEntity
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
@@ -22,15 +24,23 @@ import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerReminder
 import com.memoise.ledger.domain.model.LedgerEntry
+import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
+import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.RelationshipType
 import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.util.ArrayDeque
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import org.json.JSONObject
 
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
@@ -40,6 +50,7 @@ interface EntryRepository {
     fun observeDescriptionBlocks(entryId: String): Flow<List<LedgerDescriptionBlock>>
     fun observeNotes(entryId: String): Flow<List<LedgerNote>>
     fun observeReminders(entryId: String): Flow<List<LedgerReminder>>
+    fun observeRecurrence(seriesId: String): Flow<LedgerRecurrenceSeries?>
     suspend fun create(entry: LedgerEntry)
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
@@ -58,10 +69,22 @@ interface EntryRepository {
     suspend fun addNote(entryId: String, content: String)
     suspend fun updateNote(note: LedgerNote)
     suspend fun deleteNote(noteId: String)
-    suspend fun addReminder(entryId: String, triggerAt: Long)
-    suspend fun updateReminder(reminder: LedgerReminder, triggerAt: Long)
+    suspend fun addReminder(
+        entryId: String,
+        triggerAt: Long,
+        relativeOffsetDays: Int?,
+        relativeMinuteOfDay: Int?,
+    )
+    suspend fun updateReminder(
+        reminder: LedgerReminder,
+        triggerAt: Long,
+        relativeOffsetDays: Int?,
+        relativeMinuteOfDay: Int?,
+    )
     suspend fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean)
     suspend fun deleteReminder(reminderId: String)
+    suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency)
+    suspend fun stopRecurrence(entryId: String)
     suspend fun delete(id: String)
 }
 
@@ -75,10 +98,12 @@ class RoomEntryRepository @Inject constructor(
     private val descriptionBlockDao: EntryDescriptionBlockDao,
     private val noteDao: EntryNoteDao,
     private val reminderDao: EntryReminderDao,
+    private val recurrenceDao: RecurrenceSeriesDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
-    override fun observeEntries(): Flow<List<LedgerEntry>> =
-        entryDao.observeAll().map { entries -> entries.map(EntryEntity::toDomain) }
+    override fun observeEntries(): Flow<List<LedgerEntry>> = entryDao.observeAll()
+        .onStart { maintainRecurrenceWindow() }
+        .map { entries -> entries.map(EntryEntity::toDomain) }
 
     override fun observeRelationships(entryId: String): Flow<List<LedgerRelationship>> =
         relationshipDao.observeForEntry(entryId).map { relationships ->
@@ -101,6 +126,9 @@ class RoomEntryRepository @Inject constructor(
 
     override fun observeReminders(entryId: String): Flow<List<LedgerReminder>> =
         reminderDao.observeForEntry(entryId).map { reminders -> reminders.map(EntryReminderEntity::toDomain) }
+
+    override fun observeRecurrence(seriesId: String): Flow<LedgerRecurrenceSeries?> =
+        recurrenceDao.observeById(seriesId).map { it?.toDomainOrNull() }
 
     override suspend fun create(entry: LedgerEntry) {
         database.withTransaction {
@@ -323,9 +351,17 @@ class RoomEntryRepository @Inject constructor(
         }
     }
 
-    override suspend fun addReminder(entryId: String, triggerAt: Long) {
-        require(triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
+    override suspend fun addReminder(
+        entryId: String,
+        triggerAt: Long,
+        relativeOffsetDays: Int?,
+        relativeMinuteOfDay: Int?,
+    ) {
         val entry = entryDao.findById(entryId) ?: return
+        require(
+            triggerAt > System.currentTimeMillis() ||
+                (relativeOffsetDays != null && isActiveRecurrenceTemplate(entry)),
+        ) { "Choose a reminder time in the future." }
         check(entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
             "Completed or cancelled entries cannot have active reminders."
         }
@@ -335,6 +371,9 @@ class RoomEntryRepository @Inject constructor(
             entryId = entryId,
             triggerAt = triggerAt,
             enabled = true,
+            relativeOffsetDays = relativeOffsetDays,
+            relativeMinuteOfDay = relativeMinuteOfDay,
+            parentReminderId = null,
             createdAt = now,
             updatedAt = now,
         )
@@ -342,11 +381,18 @@ class RoomEntryRepository @Inject constructor(
             reminderDao.upsert(reminder)
             recordActivity(entryId, "Reminder added", formatReminderTime(triggerAt), now)
         }
-        reminderScheduler.schedule(reminder.id, triggerAt)
+        if (triggerAt > System.currentTimeMillis()) reminderScheduler.schedule(reminder.id, triggerAt)
+        else reminderScheduler.cancel(reminder.id)
+        val persistedEntry = entryDao.findById(entryId) ?: return
+        syncInheritedReminderIfTemplate(persistedEntry, reminder)
     }
 
-    override suspend fun updateReminder(reminder: LedgerReminder, triggerAt: Long) {
-        require(triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
+    override suspend fun updateReminder(
+        reminder: LedgerReminder,
+        triggerAt: Long,
+        relativeOffsetDays: Int?,
+        relativeMinuteOfDay: Int?,
+    ) {
         val now = System.currentTimeMillis()
         val updated = database.withTransaction {
             val existing = reminderDao.findById(reminder.id) ?: return@withTransaction null
@@ -355,12 +401,26 @@ class RoomEntryRepository @Inject constructor(
             check(entry != null && entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
                 "Completed or cancelled entries cannot have active reminders."
             }
-            val replacement = existing.copy(triggerAt = triggerAt, enabled = true, updatedAt = now)
+            require(
+                triggerAt > now ||
+                    (relativeOffsetDays != null && isActiveRecurrenceTemplate(entry)),
+            ) { "Choose a reminder time in the future." }
+            val replacement = existing.copy(
+                triggerAt = triggerAt,
+                enabled = true,
+                relativeOffsetDays = relativeOffsetDays,
+                relativeMinuteOfDay = relativeMinuteOfDay,
+                parentReminderId = null,
+                updatedAt = now,
+            )
             reminderDao.upsert(replacement)
             recordActivity(reminder.entryId, "Reminder changed", formatReminderTime(triggerAt), now)
             replacement
         } ?: return
-        reminderScheduler.schedule(updated.id, updated.triggerAt)
+        if (updated.triggerAt > System.currentTimeMillis()) reminderScheduler.schedule(updated.id, updated.triggerAt)
+        else reminderScheduler.cancel(updated.id)
+        val entry = entryDao.findById(updated.entryId) ?: return
+        syncInheritedReminderIfTemplate(entry, updated)
     }
 
     override suspend fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean) {
@@ -369,13 +429,20 @@ class RoomEntryRepository @Inject constructor(
             val existing = reminderDao.findById(reminder.id) ?: return@withTransaction null
             check(existing.entryId == reminder.entryId) { "The reminder belongs to another entry." }
             if (enabled) {
-                require(existing.triggerAt > now) { "This reminder time has passed." }
                 val entry = entryDao.findById(existing.entryId)
                 check(entry != null && entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
                     "Completed or cancelled entries cannot have active reminders."
                 }
+                require(
+                    existing.triggerAt > now ||
+                        (existing.relativeOffsetDays != null && isActiveRecurrenceTemplate(entry)),
+                ) { "This reminder time has passed." }
             }
-            val replacement = existing.copy(enabled = enabled, updatedAt = now)
+            val replacement = existing.copy(
+                enabled = enabled,
+                parentReminderId = null,
+                updatedAt = now,
+            )
             reminderDao.upsert(replacement)
             recordActivity(
                 reminder.entryId,
@@ -385,17 +452,63 @@ class RoomEntryRepository @Inject constructor(
             )
             replacement
         } ?: return
-        if (updated.enabled) reminderScheduler.schedule(updated.id, updated.triggerAt)
+        if (updated.enabled && updated.triggerAt > now) reminderScheduler.schedule(updated.id, updated.triggerAt)
         else reminderScheduler.cancel(updated.id)
+        val entry = entryDao.findById(updated.entryId) ?: return
+        syncInheritedReminderIfTemplate(entry, updated)
     }
 
     override suspend fun deleteReminder(reminderId: String) {
+        val removed = reminderDao.findById(reminderId) ?: return
+        val inherited = reminderDao.childrenOf(reminderId)
         database.withTransaction {
-            val existing = reminderDao.findById(reminderId) ?: return@withTransaction
             reminderDao.deleteById(reminderId)
-            recordActivity(existing.entryId, "Reminder removed", formatReminderTime(existing.triggerAt))
+            reminderDao.deleteChildrenOf(reminderId)
+            recordActivity(removed.entryId, "Reminder removed", formatReminderTime(removed.triggerAt))
         }
         reminderScheduler.cancel(reminderId)
+        inherited.forEach { reminderScheduler.cancel(it.id) }
+    }
+
+    override suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency) {
+        val now = System.currentTimeMillis()
+        val series = database.withTransaction {
+            val entry = entryDao.findById(entryId) ?: return@withTransaction null
+            val startsOn = checkNotNull(entry.scheduledDate) {
+                "Add a date before setting a recurrence."
+            }
+            check(entry.recurrenceSeriesId == null) { "This entry is already part of a recurrence series." }
+            val series = RecurrenceSeriesEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                ruleJson = JSONObject()
+                    .put("version", 1)
+                    .put("frequency", frequency.name)
+                    .put("interval", 1)
+                    .toString(),
+                startsOn = startsOn.toEpochDay(),
+                endsOn = null,
+                timeZoneId = ZoneId.systemDefault().id,
+                active = true,
+                createdAt = now,
+                updatedAt = now,
+            )
+            recurrenceDao.upsert(series)
+            entryDao.upsert(entry.copy(recurrenceSeriesId = series.id, updatedAt = now))
+            recordActivity(entryId, "Recurrence started", frequency.label, now)
+            series
+        } ?: return
+        generateOccurrences(series)
+    }
+
+    override suspend fun stopRecurrence(entryId: String) {
+        database.withTransaction {
+            val entry = entryDao.findById(entryId) ?: return@withTransaction
+            val seriesId = entry.recurrenceSeriesId ?: return@withTransaction
+            val series = recurrenceDao.findById(seriesId) ?: return@withTransaction
+            if (!series.active) return@withTransaction
+            recurrenceDao.upsert(series.copy(active = false, updatedAt = System.currentTimeMillis()))
+            recordActivity(entryId, "Recurrence stopped")
+        }
     }
 
     override suspend fun delete(id: String) {
@@ -412,7 +525,170 @@ class RoomEntryRepository @Inject constructor(
             }
             reminders.forEach { reminderScheduler.cancel(it.id) }
         } else {
-            reminders.forEach { reminderScheduler.schedule(it.id, it.triggerAt) }
+            reminders.forEach { reminder ->
+                if (reminder.relativeOffsetDays == null) {
+                    reminderScheduler.schedule(reminder.id, reminder.triggerAt)
+                    syncInheritedReminderIfTemplate(entry.toEntity(), reminder)
+                } else if (entry.scheduledDate == null) {
+                    reminderScheduler.cancel(reminder.id)
+                } else {
+                    val minute = reminder.relativeMinuteOfDay ?: 9 * 60
+                    val triggerAt = relativeTriggerAt(entry.scheduledDate, reminder.relativeOffsetDays, minute)
+                    val updated = reminder.copy(triggerAt = triggerAt, relativeMinuteOfDay = minute)
+                    reminderDao.upsert(updated)
+                    if (triggerAt > System.currentTimeMillis()) reminderScheduler.schedule(updated.id, triggerAt)
+                    else reminderScheduler.cancel(updated.id)
+                    syncInheritedReminderIfTemplate(entry.toEntity(), updated)
+                }
+            }
+        }
+    }
+
+    private suspend fun maintainRecurrenceWindow() {
+        for (series in recurrenceDao.findActive()) generateOccurrences(series)
+    }
+
+    private suspend fun syncInheritedReminderIfTemplate(
+        entry: EntryEntity,
+        sourceReminder: EntryReminderEntity,
+    ) {
+        val seriesId = entry.recurrenceSeriesId ?: return
+        val members = entryDao.findByRecurrenceSeries(seriesId)
+        val template = members.minByOrNull { it.createdAt } ?: return
+        if (template.id != entry.id) return
+        val templateDate = template.scheduledDate ?: return
+        val series = recurrenceDao.findById(seriesId) ?: return
+        if (!series.active) return
+        val zone = ZoneId.of(series.timeZoneId)
+        val sourceTime = java.time.Instant.ofEpochMilli(sourceReminder.triggerAt)
+            .atZone(zone)
+            .toLocalDateTime()
+        val offsetDays = sourceReminder.relativeOffsetDays
+            ?: ChronoUnit.DAYS.between(sourceTime.toLocalDate(), templateDate).toInt()
+        val minuteOfDay = sourceReminder.relativeMinuteOfDay
+            ?: sourceTime.hour * 60 + sourceTime.minute
+        val inheritedByEntry = reminderDao.childrenOf(sourceReminder.id).associateBy { it.entryId }
+        val today = LocalDate.now(zone)
+        val now = System.currentTimeMillis()
+        val replacements = members.asSequence()
+            .filter { it.id != template.id }
+            .filter { it.scheduledDate?.isAfter(today) == true }
+            .map { occurrence ->
+                val current = inheritedByEntry[occurrence.id]
+                EntryReminderEntity(
+                    id = current?.id ?: java.util.UUID.randomUUID().toString(),
+                    entryId = occurrence.id,
+                    triggerAt = relativeTriggerAt(
+                        occurrence.scheduledDate ?: return@map null,
+                        offsetDays,
+                        minuteOfDay,
+                        zone,
+                    ),
+                    enabled = sourceReminder.enabled,
+                    relativeOffsetDays = offsetDays,
+                    relativeMinuteOfDay = minuteOfDay,
+                    parentReminderId = sourceReminder.id,
+                    createdAt = current?.createdAt ?: now,
+                    updatedAt = now,
+                )
+            }
+            .filterNotNull()
+            .toList()
+        database.withTransaction { replacements.forEach { reminderDao.upsert(it) } }
+        replacements.forEach { reminder ->
+            if (reminder.enabled && reminder.triggerAt > now) {
+                reminderScheduler.schedule(reminder.id, reminder.triggerAt)
+            } else {
+                reminderScheduler.cancel(reminder.id)
+            }
+        }
+    }
+
+    private suspend fun isActiveRecurrenceTemplate(entry: EntryEntity): Boolean {
+        val seriesId = entry.recurrenceSeriesId ?: return false
+        if (recurrenceDao.findById(seriesId)?.active != true) return false
+        return entryDao.findByRecurrenceSeries(seriesId)
+            .minByOrNull { it.createdAt }
+            ?.id == entry.id
+    }
+
+    private suspend fun generateOccurrences(series: RecurrenceSeriesEntity) {
+        if (!series.active) return
+        val rule = runCatching { JSONObject(series.ruleJson) }.getOrNull() ?: return
+        if (rule.optInt("version", 0) != 1 || rule.optInt("interval", 0) != 1) return
+        val frequency = runCatching {
+            RecurrenceFrequency.valueOf(rule.optString("frequency"))
+        }.getOrNull() ?: return
+        val start = LocalDate.ofEpochDay(series.startsOn)
+        val end = series.endsOn?.let(LocalDate::ofEpochDay)
+        val today = LocalDate.now(ZoneId.of(series.timeZoneId))
+        val horizon = today.plusMonths(12)
+        val existing = entryDao.findByRecurrenceSeries(series.id)
+        val existingDates = existing.mapNotNull { it.scheduledDate?.toEpochDay() }.toHashSet()
+        val template = existing.minByOrNull { it.createdAt } ?: return
+        val templateDate = template.scheduledDate ?: return
+        val inheritedReminders = reminderDao.allForEntry(template.id)
+        val now = System.currentTimeMillis()
+        val additions = mutableListOf<EntryEntity>()
+        val reminderAdditions = mutableListOf<EntryReminderEntity>()
+        var index = 1L
+        while (index <= 100_000) {
+            val date = when (frequency) {
+                RecurrenceFrequency.DAILY -> start.plusDays(index)
+                RecurrenceFrequency.WEEKLY -> start.plusWeeks(index)
+                RecurrenceFrequency.MONTHLY -> start.plusMonths(index)
+                RecurrenceFrequency.YEARLY -> start.plusYears(index)
+            }
+            if (date.isAfter(horizon) || (end != null && date.isAfter(end))) break
+            val day = date.toEpochDay()
+            if (date.isAfter(today) && day !in existingDates) {
+                val occurrence = template.copy(
+                    id = java.util.UUID.randomUUID().toString(),
+                    status = EntryStatus.PENDING,
+                    scheduledDate = date,
+                    createdAt = now,
+                    updatedAt = now,
+                    completedAt = null,
+                    recurrenceSeriesId = series.id,
+                    sourceEntryId = null,
+                    sourceContentId = null,
+                )
+                additions += occurrence
+                inheritedReminders.forEach { sourceReminder ->
+                    val sourceDateTime = java.time.Instant.ofEpochMilli(sourceReminder.triggerAt)
+                        .atZone(ZoneId.of(series.timeZoneId))
+                        .toLocalDateTime()
+                    val offsetDays = sourceReminder.relativeOffsetDays
+                        ?: ChronoUnit.DAYS.between(sourceDateTime.toLocalDate(), templateDate).toInt()
+                    val minuteOfDay = sourceReminder.relativeMinuteOfDay
+                        ?: sourceDateTime.hour * 60 + sourceDateTime.minute
+                    reminderAdditions += EntryReminderEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        entryId = occurrence.id,
+                        triggerAt = relativeTriggerAt(
+                            date,
+                            offsetDays,
+                            minuteOfDay,
+                            ZoneId.of(series.timeZoneId),
+                        ),
+                        enabled = sourceReminder.enabled,
+                        relativeOffsetDays = offsetDays,
+                        relativeMinuteOfDay = minuteOfDay,
+                        parentReminderId = sourceReminder.parentReminderId ?: sourceReminder.id,
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                }
+            }
+            index++
+        }
+        if (additions.isNotEmpty()) {
+            database.withTransaction {
+                additions.forEach { entryDao.upsert(it) }
+                reminderAdditions.forEach { reminderDao.upsert(it) }
+            }
+            reminderAdditions.filter { it.enabled && it.triggerAt > System.currentTimeMillis() }
+                .forEach { reminderScheduler.schedule(it.id, it.triggerAt) }
         }
     }
 
@@ -463,6 +739,21 @@ private fun EntryEntity.toDomain() = LedgerEntry(
     sourceEntryId = sourceEntryId,
     sourceContentId = sourceContentId,
 )
+
+private fun RecurrenceSeriesEntity.toDomainOrNull(): LedgerRecurrenceSeries? {
+    val rule = runCatching { JSONObject(ruleJson) }.getOrNull() ?: return null
+    if (rule.optInt("version", 0) != 1) return null
+    val frequency = runCatching {
+        RecurrenceFrequency.valueOf(rule.optString("frequency"))
+    }.getOrNull() ?: return null
+    return LedgerRecurrenceSeries(
+        id = id,
+        frequency = frequency,
+        startsOnEpochDay = startsOn,
+        endsOnEpochDay = endsOn,
+        active = active,
+    )
+}
 
 private fun LedgerEntry.toEntity() = EntryEntity(
     id = id,
@@ -522,6 +813,8 @@ private fun EntryReminderEntity.toDomain() = LedgerReminder(
     entryId = entryId,
     triggerAt = triggerAt,
     enabled = enabled,
+    relativeOffsetDays = relativeOffsetDays,
+    relativeMinuteOfDay = relativeMinuteOfDay,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
@@ -559,9 +852,24 @@ private fun LedgerReminder.toEntity() = EntryReminderEntity(
     entryId = entryId,
     triggerAt = triggerAt,
     enabled = enabled,
+    relativeOffsetDays = relativeOffsetDays,
+    relativeMinuteOfDay = relativeMinuteOfDay,
+    parentReminderId = null,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
+
+private fun relativeTriggerAt(
+    date: LocalDate,
+    offsetDays: Int,
+    minuteOfDay: Int,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Long =
+    date.minusDays(offsetDays.toLong())
+        .atTime(LocalTime.of(minuteOfDay / 60, minuteOfDay % 60))
+        .atZone(zone)
+        .toInstant()
+        .toEpochMilli()
 
 private fun EntryActivityEntity.toDomain() = LedgerActivity(
     id = id,

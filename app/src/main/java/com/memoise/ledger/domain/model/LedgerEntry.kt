@@ -78,6 +78,8 @@ data class LedgerReminder(
     val entryId: String,
     val triggerAt: Long,
     val enabled: Boolean,
+    val relativeOffsetDays: Int? = null,
+    val relativeMinuteOfDay: Int? = null,
     val createdAt: Long,
     val updatedAt: Long,
 )

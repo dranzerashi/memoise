@@ -32,6 +32,9 @@ class ReminderNotificationWorker(
             MemoiseDatabase.MIGRATION_3_4,
             MemoiseDatabase.MIGRATION_4_5,
             MemoiseDatabase.MIGRATION_5_6,
+            MemoiseDatabase.MIGRATION_6_7,
+            MemoiseDatabase.MIGRATION_7_8,
+            MemoiseDatabase.MIGRATION_8_9,
         ).build()
 
         try {

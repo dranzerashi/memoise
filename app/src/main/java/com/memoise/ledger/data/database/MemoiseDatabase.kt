@@ -15,8 +15,9 @@ import androidx.room.TypeConverters
         EntryDescriptionBlockEntity::class,
         EntryNoteEntity::class,
         EntryReminderEntity::class,
+        RecurrenceSeriesEntity::class,
     ],
-    version = 6,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -28,6 +29,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryDescriptionBlockDao(): EntryDescriptionBlockDao
     abstract fun entryNoteDao(): EntryNoteDao
     abstract fun entryReminderDao(): EntryReminderDao
+    abstract fun recurrenceSeriesDao(): RecurrenceSeriesDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -152,6 +154,37 @@ abstract class MemoiseDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_entry_reminders_entryId_triggerAt` ON `entry_reminders` (`entryId`, `triggerAt`)",
                 )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `recurrence_series` (
+                        `id` TEXT NOT NULL,
+                        `ruleJson` TEXT NOT NULL,
+                        `startsOn` INTEGER NOT NULL,
+                        `endsOn` INTEGER,
+                        `timeZoneId` TEXT NOT NULL,
+                        `active` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )""".trimIndent(),
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `entry_reminders` ADD COLUMN `relativeOffsetDays` INTEGER")
+                db.execSQL("ALTER TABLE `entry_reminders` ADD COLUMN `relativeMinuteOfDay` INTEGER")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `entry_reminders` ADD COLUMN `parentReminderId` TEXT")
             }
         }
     }

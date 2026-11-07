@@ -81,3 +81,23 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 - Added timestamped reminders with add, edit, enable/disable, and remove actions. Notifications use WorkManager and are approximate; completed or cancelled entries stop active reminders.
 - Added the `entry_reminders` Room table and non-destructive migration from schema version 5 to 6.
 - Delivery issue reported: reminders appear only while Memoise is open or in the background. Investigate on the Pixel when device access is available.
+
+## 2026-11-07 — Recurring entry foundation
+
+- Added daily, weekly, monthly, and yearly recurrence for dated entries. Occurrences are independent ledger entries, generated through a rolling 12-month window; stopping a series keeps existing occurrences.
+- Added the versioned recurrence rule table and non-destructive migration from schema version 6 to 7.
+- Debug build assembled successfully and is ready for Pixel verification. Editing a recurrence definition and choosing an edit scope remain future steps.
+
+## 2026-11-07 — Relative reminders for recurring entries
+
+- Added relative reminder choices including one week, three days, and one day before, plus on the day. Relative reminders follow scheduled-date changes.
+- Future recurring occurrences inherit the parent’s reminder timing; parent reminder changes update upcoming copies, while editing an occurrence reminder makes it independent.
+- Added non-destructive Room migrations from schema version 7 to 9. The updated debug build is ready for Pixel verification.
+
+## 2026-11-07 — Reminder pattern selector
+
+- Made reminder timing choices explicit when adding a reminder. Active recurring series can save a relative pattern even when its first occurrence’s reminder date has passed; the pattern applies to future occurrences.
+
+## 2026-11-07 — Recurrence and reminder verification
+
+- The user verified that recurrence and inherited reminder patterns work on the Pixel.

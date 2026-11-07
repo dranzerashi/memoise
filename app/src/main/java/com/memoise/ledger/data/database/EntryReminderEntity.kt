@@ -22,6 +22,9 @@ data class EntryReminderEntity(
     val entryId: String,
     val triggerAt: Long,
     val enabled: Boolean,
+    val relativeOffsetDays: Int?,
+    val relativeMinuteOfDay: Int?,
+    val parentReminderId: String?,
     val createdAt: Long,
     val updatedAt: Long,
 )

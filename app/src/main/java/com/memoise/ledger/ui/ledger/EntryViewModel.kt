@@ -12,13 +12,17 @@ import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerReminder
 import com.memoise.ledger.domain.model.LedgerRelationship
+import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
+import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.RelationshipType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -63,6 +67,16 @@ class EntryViewModel @Inject constructor(
     fun descriptionBlocksFor(entryId: String) = repository.observeDescriptionBlocks(entryId)
     fun notesFor(entryId: String) = repository.observeNotes(entryId)
     fun remindersFor(entryId: String) = repository.observeReminders(entryId)
+    fun recurrenceFor(seriesId: String?): Flow<LedgerRecurrenceSeries?> =
+        seriesId?.let(repository::observeRecurrence) ?: flowOf(null)
+
+    fun createRecurrence(entryId: String, frequency: RecurrenceFrequency) {
+        viewModelScope.launch { repository.createRecurrence(entryId, frequency) }
+    }
+
+    fun stopRecurrence(entryId: String) {
+        viewModelScope.launch { repository.stopRecurrence(entryId) }
+    }
 
     fun addChecklistItem(entryId: String, title: String) {
         viewModelScope.launch { repository.addChecklistItem(entryId, title) }
@@ -100,12 +114,21 @@ class EntryViewModel @Inject constructor(
         viewModelScope.launch { repository.deleteNote(note.id) }
     }
 
-    fun addReminder(entryId: String, triggerAt: Long) {
-        viewModelScope.launch { repository.addReminder(entryId, triggerAt) }
+    fun addReminder(entryId: String, triggerAt: Long, relativeOffsetDays: Int?, minuteOfDay: Int?) {
+        viewModelScope.launch {
+            repository.addReminder(entryId, triggerAt, relativeOffsetDays, minuteOfDay)
+        }
     }
 
-    fun updateReminder(reminder: LedgerReminder, triggerAt: Long) {
-        viewModelScope.launch { repository.updateReminder(reminder, triggerAt) }
+    fun updateReminder(
+        reminder: LedgerReminder,
+        triggerAt: Long,
+        relativeOffsetDays: Int?,
+        minuteOfDay: Int?,
+    ) {
+        viewModelScope.launch {
+            repository.updateReminder(reminder, triggerAt, relativeOffsetDays, minuteOfDay)
+        }
     }
 
     fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean) {

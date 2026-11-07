@@ -85,6 +85,8 @@ import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerReminder
+import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
+import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.RelationshipType
 import java.time.LocalDate
@@ -217,6 +219,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     val reminders by remember(entry.id) {
                         viewModel.remindersFor(entry.id)
                     }.collectAsState(initial = emptyList())
+                    val recurrence by remember(entry.recurrenceSeriesId) {
+                        viewModel.recurrenceFor(entry.recurrenceSeriesId)
+                    }.collectAsState(initial = null)
                     EntryDetailScreen(
                         entry = entry,
                         entries = entries,
@@ -226,6 +231,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         descriptionBlocks = descriptionBlocks,
                         notes = notes,
                         reminders = reminders,
+                        recurrence = recurrence,
                         onUpdate = viewModel::update,
                         onSetStatus = viewModel::setStatus,
                         onSetDatePurpose = viewModel::setDatePurpose,
@@ -247,6 +253,8 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         onUpdateReminder = viewModel::updateReminder,
                         onSetReminderEnabled = viewModel::setReminderEnabled,
                         onDeleteReminder = viewModel::deleteReminder,
+                        onCreateRecurrence = viewModel::createRecurrence,
+                        onStopRecurrence = viewModel::stopRecurrence,
                         onConvertChecklistItems = { type, items ->
                             navController.navigate(
                                 "related-capture/${entry.id}/${type.name}?sourceChecklistItemIds=${items.joinToString(",") { it.id }}",
@@ -799,6 +807,7 @@ private fun EntryDetailScreen(
     descriptionBlocks: List<LedgerDescriptionBlock>,
     notes: List<LedgerNote>,
     reminders: List<LedgerReminder>,
+    recurrence: LedgerRecurrenceSeries?,
     onUpdate: (LedgerEntry) -> Unit,
     onSetStatus: (LedgerEntry, EntryStatus) -> Unit,
     onSetDatePurpose: (LedgerEntry, DatePurpose) -> Unit,
@@ -813,10 +822,12 @@ private fun EntryDetailScreen(
     onAddNote: (String, String) -> Unit,
     onUpdateNote: (LedgerNote) -> Unit,
     onDeleteNote: (LedgerNote) -> Unit,
-    onAddReminder: (String, Long) -> Unit,
-    onUpdateReminder: (LedgerReminder, Long) -> Unit,
+    onAddReminder: (String, Long, Int?, Int?) -> Unit,
+    onUpdateReminder: (LedgerReminder, Long, Int?, Int?) -> Unit,
     onSetReminderEnabled: (LedgerReminder, Boolean) -> Unit,
     onDeleteReminder: (LedgerReminder) -> Unit,
+    onCreateRecurrence: (String, RecurrenceFrequency) -> Unit,
+    onStopRecurrence: (String) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -824,6 +835,14 @@ private fun EntryDetailScreen(
 ) {
     var title by rememberSaveable(entry.id) { mutableStateOf(entry.title) }
     var showDeleteConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
+    val isRecurrenceTemplate = remember(entries, entry.recurrenceSeriesId, entry.id) {
+        val seriesId = entry.recurrenceSeriesId
+        seriesId != null && entries
+            .filter { it.recurrenceSeriesId == seriesId }
+            .minByOrNull { it.createdAt }
+            ?.id == entry.id
+    }
+    val allowPastRelativeReminder = recurrence?.active == true && isRecurrenceTemplate
     LaunchedEffect(entry.title) {
         if (title.isNotBlank()) title = entry.title
     }
@@ -904,6 +923,13 @@ private fun EntryDetailScreen(
                         },
                     )
                 }
+                Spacer(Modifier.height(18.dp))
+                RecurrenceSection(
+                    entry = entry,
+                    recurrence = recurrence,
+                    onCreate = { frequency -> onCreateRecurrence(entry.id, frequency) },
+                    onStop = { onStopRecurrence(entry.id) },
+                )
                 Spacer(Modifier.height(22.dp))
                 DescriptionSection(
                     entryId = entry.id,
@@ -938,6 +964,8 @@ private fun EntryDetailScreen(
                 Spacer(Modifier.height(22.dp))
                 ReminderSection(
                     entryId = entry.id,
+                    entryDate = entry.scheduledDate,
+                    allowPastRelative = allowPastRelativeReminder,
                     entryStatus = entry.status,
                     reminders = reminders,
                     onAdd = onAddReminder,
@@ -1609,10 +1637,12 @@ private fun NoteRow(
 @Composable
 private fun ReminderSection(
     entryId: String,
+    entryDate: LocalDate?,
+    allowPastRelative: Boolean,
     entryStatus: EntryStatus,
     reminders: List<LedgerReminder>,
-    onAdd: (String, Long) -> Unit,
-    onUpdate: (LedgerReminder, Long) -> Unit,
+    onAdd: (String, Long, Int?, Int?) -> Unit,
+    onUpdate: (LedgerReminder, Long, Int?, Int?) -> Unit,
     onSetEnabled: (LedgerReminder, Boolean) -> Unit,
     onDelete: (LedgerReminder) -> Unit,
 ) {
@@ -1646,7 +1676,7 @@ private fun ReminderSection(
         SectionLabel("REMINDERS")
         if (reminders.isEmpty()) {
             Text(
-                text = "Reminders are independent of the entry date.",
+                text = "Set reminders for a specific date or relative to this entry’s date.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 7.dp),
@@ -1686,12 +1716,75 @@ private fun ReminderSection(
     if (showEditor) {
         ReminderEditorDialog(
             reminder = editingReminder,
+            entryDate = entryDate,
+            allowPastRelative = allowPastRelative,
             onDismiss = { showEditor = false },
-            onSave = { current, triggerAt ->
-                if (current == null) onAdd(entryId, triggerAt) else onUpdate(current, triggerAt)
+            onSave = { current, triggerAt, relativeOffsetDays, minuteOfDay ->
+                if (current == null) {
+                    onAdd(entryId, triggerAt, relativeOffsetDays, minuteOfDay)
+                } else {
+                    onUpdate(current, triggerAt, relativeOffsetDays, minuteOfDay)
+                }
                 showEditor = false
             },
         )
+    }
+}
+
+@Composable
+private fun RecurrenceSection(
+    entry: LedgerEntry,
+    recurrence: LedgerRecurrenceSeries?,
+    onCreate: (RecurrenceFrequency) -> Unit,
+    onStop: () -> Unit,
+) {
+    var expanded by remember(entry.id) { mutableStateOf(false) }
+    Column {
+        SectionLabel("REPEAT")
+        if (recurrence == null) {
+            Box {
+                TextButton(
+                    onClick = { expanded = true },
+                    enabled = entry.scheduledDate != null,
+                    modifier = Modifier.padding(start = 0.dp),
+                ) { Text("Choose frequency") }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    RecurrenceFrequency.entries.forEach { frequency ->
+                        DropdownMenuItem(
+                            text = { Text(frequency.label) },
+                            onClick = {
+                                expanded = false
+                                onCreate(frequency)
+                            },
+                        )
+                    }
+                }
+            }
+            if (entry.scheduledDate == null) {
+                Text(
+                    text = "Add a date before setting a recurrence.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                text = "${recurrence.frequency.label} · ${if (recurrence.active) "Repeating" else "Stopped"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (recurrence.active) {
+                Text(
+                    text = "Future entries are created through ${formatDate(LocalDate.now().plusMonths(12))}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+                TextButton(onClick = onStop, modifier = Modifier.align(Alignment.End)) {
+                    Text("Stop repeating")
+                }
+            }
+        }
     }
 }
 
@@ -1713,7 +1806,14 @@ private fun ReminderRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                text = formatDateTime(reminder.triggerAt),
+                text = reminder.relativeOffsetDays?.let { offset ->
+                    val relativeLabel = when {
+                        offset > 0 -> if (offset == 7) "1 week before" else "$offset days before"
+                        offset < 0 -> "${-offset} days after"
+                        else -> "On the day"
+                    }
+                    "$relativeLabel · ${formatDateTime(reminder.triggerAt)}"
+                } ?: formatDateTime(reminder.triggerAt),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -1771,18 +1871,28 @@ private fun ReminderRow(
 @Composable
 private fun ReminderEditorDialog(
     reminder: LedgerReminder?,
+    entryDate: LocalDate?,
+    allowPastRelative: Boolean,
     onDismiss: () -> Unit,
-    onSave: (LedgerReminder?, Long) -> Unit,
+    onSave: (LedgerReminder?, Long, Int?, Int?) -> Unit,
 ) {
     val context = LocalContext.current
-    val initial = remember(reminder?.id) {
+    val initialDateTime = remember(reminder?.id) {
         reminder?.triggerAt?.let { millis ->
             java.time.Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDateTime()
-        } ?: LocalDateTime.now().plusHours(1).withSecond(0).withNano(0)
+        } ?: LocalDate.now().plusDays(1).atTime(9, 0)
     }
-    var date by remember(reminder?.id) { mutableStateOf(initial.toLocalDate()) }
-    var time by remember(reminder?.id) { mutableStateOf(initial.toLocalTime()) }
-    val triggerAt = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    var date by remember(reminder?.id) { mutableStateOf(initialDateTime.toLocalDate()) }
+    var time by remember(reminder?.id) {
+        mutableStateOf(
+            reminder?.relativeMinuteOfDay?.let { LocalTime.of(it / 60, it % 60) }
+                ?: initialDateTime.toLocalTime(),
+        )
+    }
+    var relativeOffsetDays by remember(reminder?.id) { mutableStateOf(reminder?.relativeOffsetDays) }
+    var timingMenuExpanded by remember(reminder?.id) { mutableStateOf(false) }
+    val reminderDate = relativeOffsetDays?.let { offset -> entryDate?.minusDays(offset.toLong()) } ?: date
+    val triggerAt = reminderDate.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     val isFuture = triggerAt > System.currentTimeMillis()
 
     AlertDialog(
@@ -1791,16 +1901,72 @@ private fun ReminderEditorDialog(
         text = {
             Column {
                 Text(
-                    text = "Choose when to be notified. Delivery time is approximate.",
+                    text = "Choose when to be notified. Relative reminders follow this entry’s date and repeat with its occurrences.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                DatePickerControl(
-                    date = date,
-                    onDateSelected = { if (it != null) date = it },
-                    label = "Reminder date",
-                )
+                Box {
+                    OutlinedButton(onClick = { timingMenuExpanded = true }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                relativeOffsetDays?.let { offset ->
+                                when {
+                                    offset == 7 -> "1 week before"
+                                    offset > 0 -> "$offset days before"
+                                    offset < 0 -> "${-offset} days after"
+                                    else -> "On the day"
+                                }
+                                } ?: "Custom date and time",
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("⌄", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = timingMenuExpanded,
+                        onDismissRequest = { timingMenuExpanded = false },
+                    ) {
+                        listOf(7 to "1 week before", 3 to "3 days before", 1 to "1 day before", 0 to "On the day")
+                            .forEach { (offset, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    enabled = entryDate != null,
+                                    onClick = {
+                                        relativeOffsetDays = offset
+                                        timingMenuExpanded = false
+                                    },
+                                )
+                            }
+                        DropdownMenuItem(
+                            text = { Text("Custom date and time") },
+                            onClick = {
+                                relativeOffsetDays = null
+                                timingMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+                if (entryDate == null) {
+                    Text(
+                        text = "Add an entry date to enable relative reminder patterns.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (relativeOffsetDays == null) {
+                    DatePickerControl(
+                        date = date,
+                        onDateSelected = { if (it != null) date = it },
+                        label = "Reminder date",
+                    )
+                } else {
+                    Text(
+                        text = reminderDate.format(DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.getDefault())),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 TextButton(
                     onClick = {
                         TimePickerDialog(
@@ -1816,17 +1982,32 @@ private fun ReminderEditorDialog(
                 }
                 if (!isFuture) {
                     Text(
-                        text = "Choose a time in the future.",
+                        text = if (allowPastRelative && relativeOffsetDays != null) {
+                            "This reminder has passed for the first date; it will be set on future occurrences."
+                        } else {
+                            "Choose a time in the future."
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = if (allowPastRelative && relativeOffsetDays != null) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
                     )
                 }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(reminder, triggerAt) },
-                enabled = isFuture,
+                onClick = {
+                    onSave(
+                        reminder,
+                        triggerAt,
+                        relativeOffsetDays,
+                        if (relativeOffsetDays == null) null else time.hour * 60 + time.minute,
+                    )
+                },
+                enabled = isFuture || (allowPastRelative && relativeOffsetDays != null),
             ) { Text("Save") }
         },
         dismissButton = {
