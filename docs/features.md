@@ -5,7 +5,9 @@ This document records current product behavior. User-facing explanations will be
 ## Recurring entries
 
 - A dated entry can repeat daily, weekly, monthly, or yearly.
+- Starting a repeat opens one setup dialog for frequency and optional end date. Occurrences are generated only after **Start repeating** is chosen.
 - Memoise stores occurrences as independent entries and keeps a rolling window of up to 12 months of future dates.
+- A series can have an end date. After it, Memoise adds no new repeats; entries already in the ledger stay, even when scheduled after that date. Choosing **Never** removes the end date. Changing an existing end date is applied with **Apply changes**.
 - Each occurrence links to its source through the same entry relationship graph used by preparations, follow-ups, and related entries. Open an occurrence and use **Source: _entry title_** under **Repeat** to navigate to the series source. The source lists its generated entries under **Occurrences**.
 - Stopping a series preserves its source and all occurrences already created. No further occurrences are generated.
 - Completing or cancelling an occurrence affects only that entry; the series continues.
@@ -13,7 +15,7 @@ This document records current product behavior. User-facing explanations will be
 - Skipped entries and one-off date changes are kept as exceptions to the series, so Memoise will not recreate the original occurrence after it is skipped, moved, or removed. Moving an occurrence back to its original date clears that exception.
 - Repeat exceptions are included in both JSON exports and full database backups.
 - Editing an occurrence’s title, date, status, notes, or relationships does not change other occurrences. Editing the source does not rewrite occurrences already created.
-- If the source entry is deleted, the oldest remaining occurrence becomes the source and the active series continues. If there are no remaining occurrences, the series stops.
+- When the first entry is removed, the user can remove only that entry (the oldest remaining occurrence becomes the source) or remove all repeats and their saved details.
 
 ## Reminder inheritance
 
@@ -31,3 +33,7 @@ This document records current product behavior. User-facing explanations will be
 - Custom clickable rows have at least a 48 dp touch area. Status is also described with text or a completion mark, not colour alone.
 - Text uses scalable units. Search filters and the entry status/date-meaning pair stack at large system text sizes or on narrow screens.
 - Android’s high-contrast-text setting selects a stronger light palette; the normal almanac palette remains in use otherwise. Dark-theme text colors already have strong contrast.
+
+## Appearance
+
+- Choose **System default**, **Light**, or **Dark** in Settings. The choice is saved on this device and applied across the app. System default follows Android’s current appearance setting.

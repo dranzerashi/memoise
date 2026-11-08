@@ -18,4 +18,7 @@ interface RecurrenceSeriesDao {
 
     @Upsert
     suspend fun upsert(series: RecurrenceSeriesEntity)
+
+    @Query("DELETE FROM recurrence_series WHERE id = :id")
+    suspend fun deleteById(id: String)
 }

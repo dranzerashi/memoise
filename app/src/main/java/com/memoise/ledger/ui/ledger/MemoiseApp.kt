@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -46,6 +48,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -109,6 +112,7 @@ import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import com.memoise.ledger.domain.model.LedgerRestorePreview
+import com.memoise.ledger.data.preferences.ThemePreference
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -303,6 +307,8 @@ fun MemoiseApp(
             composable(SETTINGS_ROUTE) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
+                    themePreference = viewModel.themePreference.collectAsState().value,
+                    onThemePreferenceSelected = viewModel::setThemePreference,
                     onExportJson = {
                         exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
                     },
@@ -397,6 +403,7 @@ fun MemoiseApp(
                         onSetReminderEnabled = viewModel::setReminderEnabled,
                         onDeleteReminder = viewModel::deleteReminder,
                         onCreateRecurrence = viewModel::createRecurrence,
+                        onSetRecurrenceEndDate = viewModel::setRecurrenceEndDate,
                         onStopRecurrence = viewModel::stopRecurrence,
                         onSkipRecurrenceOccurrence = viewModel::skipRecurrenceOccurrence,
                         onConvertChecklistItems = { type, items ->
@@ -406,6 +413,10 @@ fun MemoiseApp(
                         },
                         onDelete = {
                             viewModel.delete(entry)
+                            navController.popBackStack()
+                        },
+                        onDeleteRecurrenceSeries = {
+                            viewModel.deleteRecurrenceSeries(entry.id)
                             navController.popBackStack()
                         },
                         onAddRelationship = { type ->
@@ -958,6 +969,8 @@ private fun SearchDateField(
 @Composable
 private fun SettingsScreen(
     onBack: () -> Unit,
+    themePreference: ThemePreference,
+    onThemePreferenceSelected: (ThemePreference) -> Unit,
     onExportJson: () -> Unit,
     onCreateDatabaseBackup: () -> Unit,
     onChooseRestoreFile: () -> Unit,
@@ -967,12 +980,40 @@ private fun SettingsScreen(
     onDismissRestore: () -> Unit,
     onConfirmRestore: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         LedgerHeader(
             title = "Settings",
             subtitle = "Your ledger stays on this device.",
             trailing = { TextButton(onClick = onBack) { Text("Back") } },
         )
+        Box(Modifier.padding(start = 26.dp, top = 12.dp)) {
+            SectionLabel("APPEARANCE")
+        }
+        Text(
+            "Choose how Memoise looks on this device.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ThemePreference.entries.forEach { preference ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable { onThemePreferenceSelected(preference) }
+                    .padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = themePreference == preference,
+                    onClick = { onThemePreferenceSelected(preference) },
+                )
+                Text(
+                    text = preference.label,
+                    modifier = Modifier.padding(start = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
         Box(Modifier.padding(start = 26.dp, top = 12.dp)) {
             SectionLabel("BACKUP AND RESTORE")
         }
@@ -1385,12 +1426,14 @@ private fun EntryDetailScreen(
     onUpdateReminder: (LedgerReminder, Long, Int?, Int?) -> Unit,
     onSetReminderEnabled: (LedgerReminder, Boolean) -> Unit,
     onDeleteReminder: (LedgerReminder) -> Unit,
-    onCreateRecurrence: (String, RecurrenceFrequency) -> Unit,
+    onCreateRecurrence: (String, RecurrenceFrequency, LocalDate?) -> Unit,
+    onSetRecurrenceEndDate: (String, LocalDate?) -> Unit,
     onStopRecurrence: (String) -> Unit,
     onSkipRecurrenceOccurrence: (String) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
+    onDeleteRecurrenceSeries: () -> Unit,
     onBack: () -> Unit,
 ) {
     var title by rememberSaveable(entry.id) { mutableStateOf(entry.title) }
@@ -1406,6 +1449,10 @@ private fun EntryDetailScreen(
         entries.firstOrNull { it.id == recurrenceSourceId }
     }
     val isRecurrenceTemplate = recurrenceSourceId == entry.id
+    val hasRepeatEntries = entry.recurrenceSeriesId?.let { seriesId ->
+        entries.any { it.id != entry.id && it.recurrenceSeriesId == seriesId }
+    } == true
+    val canRemoveWholeRepeatSet = recurrence != null && isRecurrenceTemplate && hasRepeatEntries
     val allowPastRelativeReminder = recurrence?.active == true && isRecurrenceTemplate
     LaunchedEffect(entry.title) {
         if (title.isNotBlank()) title = entry.title
@@ -1516,7 +1563,10 @@ private fun EntryDetailScreen(
                     recurrence = recurrence,
                     sourceEntry = recurrenceSource,
                     isRecurrenceTemplate = isRecurrenceTemplate,
-                    onCreate = { frequency -> onCreateRecurrence(entry.id, frequency) },
+                    onCreate = { frequency, endDate ->
+                        onCreateRecurrence(entry.id, frequency, endDate)
+                    },
+                    onSetEndDate = { date -> onSetRecurrenceEndDate(entry.id, date) },
                     onStop = { onStopRecurrence(entry.id) },
                     onSkip = { onSkipRecurrenceOccurrence(entry.id) },
                     onOpenSource = onOpenEntry,
@@ -1650,19 +1700,42 @@ private fun EntryDetailScreen(
     }
 
     if (showDeleteConfirmation) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirmation = false },
-            title = { Text("Delete this entry?") },
-            text = { Text("${entry.title} will be removed from your ledger.") },
-            confirmButton = {
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Keep entry") }
-            },
-        )
+        if (canRemoveWholeRepeatSet) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirmation = false },
+                title = { Text("Remove this repeating entry?") },
+                text = {
+                    Text(
+                        "Remove only this entry and keep the other repeats, or remove all repeats too? " +
+                            "Removing all also removes the notes, steps, reminders, and other details on them.",
+                    )
+                },
+                confirmButton = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        TextButton(onClick = onDelete) { Text("Remove this entry only") }
+                        TextButton(onClick = onDeleteRecurrenceSeries) {
+                            Text("Remove all repeats", color = MaterialTheme.colorScheme.error)
+                        }
+                        TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
+                    }
+                },
+                dismissButton = {},
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirmation = false },
+                title = { Text("Delete this entry?") },
+                text = { Text("${entry.title} will be removed from your ledger.") },
+                confirmButton = {
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirmation = false }) { Text("Keep entry") }
+                },
+            )
+        }
     }
 }
 
@@ -2414,19 +2487,24 @@ private fun ReminderSection(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun RecurrenceSection(
     entry: LedgerEntry,
     recurrence: LedgerRecurrenceSeries?,
     sourceEntry: LedgerEntry?,
     isRecurrenceTemplate: Boolean,
-    onCreate: (RecurrenceFrequency) -> Unit,
+    onCreate: (RecurrenceFrequency, LocalDate?) -> Unit,
+    onSetEndDate: (LocalDate?) -> Unit,
     onStop: () -> Unit,
     onSkip: () -> Unit,
     onOpenSource: (LedgerEntry) -> Unit,
 ) {
-    var expanded by remember(entry.id) { mutableStateOf(false) }
+    var showSetup by rememberSaveable(entry.id) { mutableStateOf(false) }
     var showStopConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
     var showSkipConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
+    var showEndDateEditor by rememberSaveable(entry.id) { mutableStateOf(false) }
+    val endDate = recurrence?.endsOnEpochDay?.let(LocalDate::ofEpochDay)
+    val recurrenceStartDate = recurrence?.startsOnEpochDay?.let(LocalDate::ofEpochDay)
     Column {
         SectionLabel("REPEAT")
         if (sourceEntry != null && sourceEntry.id != entry.id) {
@@ -2444,24 +2522,11 @@ private fun RecurrenceSection(
             )
         }
         if (recurrence == null) {
-            Box {
-                TextButton(
-                    onClick = { expanded = true },
-                    enabled = entry.scheduledDate != null,
-                    modifier = Modifier.padding(start = 0.dp),
-                ) { Text("Choose how often") }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    RecurrenceFrequency.entries.forEach { frequency ->
-                        DropdownMenuItem(
-                            text = { Text(frequency.label) },
-                            onClick = {
-                                expanded = false
-                                onCreate(frequency)
-                            },
-                        )
-                    }
-                }
-            }
+            TextButton(
+                onClick = { showSetup = true },
+                enabled = entry.scheduledDate != null,
+                modifier = Modifier.padding(start = 0.dp),
+            ) { Text("Choose how often") }
             if (entry.scheduledDate == null) {
                 Text(
                     text = "Add a date before setting a recurrence.",
@@ -2485,8 +2550,18 @@ private fun RecurrenceSection(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (recurrence.active) {
+                if (isRecurrenceTemplate) {
+                    TextButton(
+                        onClick = { showEndDateEditor = true },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text(endDate?.let { "Repeat through ${formatDate(it)}" } ?: "Choose an end date")
+                    }
+                }
                 Text(
-                    text = "More entries will be added over time. Showing through ${formatDate(LocalDate.now().plusMonths(12))}.",
+                    text = endDate?.let {
+                        "No new repeats after ${formatDate(it)}. Entries already in your ledger stay."
+                    } ?: "More entries will be added over time. Showing through ${formatDate(LocalDate.now().plusMonths(12))}.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 3.dp),
@@ -2511,6 +2586,32 @@ private fun RecurrenceSection(
                 }
             }
         }
+    }
+    if (showSetup && recurrence == null && entry.scheduledDate != null) {
+        RecurrenceSetupDialog(
+            firstDate = entry.scheduledDate,
+            initialFrequency = RecurrenceFrequency.WEEKLY,
+            initialEndDate = null,
+            editingExistingRepeat = false,
+            onDismiss = { showSetup = false },
+            onSave = { frequency, date ->
+                onCreate(frequency, date)
+                showSetup = false
+            },
+        )
+    }
+    if (showEndDateEditor && recurrence?.active == true && isRecurrenceTemplate) {
+        RecurrenceSetupDialog(
+            firstDate = recurrenceStartDate ?: LocalDate.now(),
+            initialFrequency = recurrence.frequency,
+            initialEndDate = endDate,
+            editingExistingRepeat = true,
+            onDismiss = { showEndDateEditor = false },
+            onSave = { _, date ->
+                onSetEndDate(date)
+                showEndDateEditor = false
+            },
+        )
     }
     if (showStopConfirmation) {
         AlertDialog(
@@ -2549,6 +2650,138 @@ private fun RecurrenceSection(
                 TextButton(onClick = { showSkipConfirmation = false }) { Text("Keep it") }
             },
         )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun RecurrenceSetupDialog(
+    firstDate: LocalDate,
+    initialFrequency: RecurrenceFrequency,
+    initialEndDate: LocalDate?,
+    editingExistingRepeat: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (RecurrenceFrequency, LocalDate?) -> Unit,
+) {
+    var frequency by remember(initialFrequency) { mutableStateOf(initialFrequency) }
+    var endDate by remember(initialEndDate) { mutableStateOf(initialEndDate) }
+    var frequencyMenuExpanded by remember { mutableStateOf(false) }
+    var endMenuExpanded by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (editingExistingRepeat) "Change repeat end" else "Set up repeating") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("How often")
+                if (editingExistingRepeat) {
+                    Text(frequency.label)
+                } else {
+                    Box {
+                        OutlinedButton(onClick = { frequencyMenuExpanded = true }) {
+                            Text(frequency.label)
+                        }
+                        DropdownMenu(
+                            expanded = frequencyMenuExpanded,
+                            onDismissRequest = { frequencyMenuExpanded = false },
+                        ) {
+                            RecurrenceFrequency.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    onClick = {
+                                        frequency = option
+                                        frequencyMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Text("Ends")
+                Box {
+                    OutlinedButton(onClick = { endMenuExpanded = true }) {
+                        Text(endDate?.let { "On ${formatDate(it)}" } ?: "Never")
+                    }
+                    DropdownMenu(
+                        expanded = endMenuExpanded,
+                        onDismissRequest = { endMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Never") },
+                            onClick = {
+                                endDate = null
+                                endMenuExpanded = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Choose a date") },
+                            onClick = {
+                                endMenuExpanded = false
+                                showDatePicker = true
+                            },
+                        )
+                    }
+                }
+                if (editingExistingRepeat) {
+                    Text(
+                        "This changes future repeats. Entries already added stay in your ledger.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "You can change this later. Repeats are added after you start.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            val canApply = endDate?.let { !it.isBefore(firstDate) } ?: true
+            TextButton(
+                enabled = canApply,
+                onClick = { onSave(frequency, endDate) },
+            ) {
+                Text(if (editingExistingRepeat) "Apply changes" else "Start repeating")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+
+    if (showDatePicker) {
+        val initialDate = endDate ?: firstDate
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialDate.atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
+        )
+        val selectedDate = pickerState.selectedDateMillis?.let { millis ->
+            java.time.Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+        }
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    enabled = selectedDate != null && !selectedDate.isBefore(firstDate),
+                    onClick = {
+                        selectedDate?.let { endDate = it }
+                        showDatePicker = false
+                    },
+                ) { Text("Use date") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } },
+        ) {
+            Column {
+                Text(
+                    "Choose a date on or after ${formatDate(firstDate)}.",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                DatePicker(state = pickerState)
+            }
+        }
     }
 }
 

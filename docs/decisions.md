@@ -29,3 +29,8 @@ Use the occurrence’s existing cancelled status; keep the entry and its history
 ## D-007 — Recurrence exceptions
 
 Store skipped and moved occurrence dates under their existing series so generation cannot recreate an overridden date; keep occurrence links in the existing relationship graph.
+
+
+## D-008 — Repeat setup and removal
+
+Choose frequency and end date before generating a new repeat. Changing an existing end date does not erase entries already added. When removing the first entry, offer a choice to keep the other repeats or remove the entire repeat set.

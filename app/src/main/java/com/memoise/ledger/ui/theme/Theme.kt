@@ -18,6 +18,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.memoise.ledger.data.preferences.ThemePreference
 
 private val LightColors = lightColorScheme(
     primary = Olive,
@@ -53,9 +54,14 @@ private val HighContrastLightColors = LightColors.copy(
 
 @Composable
 fun MemoiseTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themePreference: ThemePreference = ThemePreference.SYSTEM,
     content: @Composable () -> Unit,
 ) {
+    val darkTheme = when (themePreference) {
+        ThemePreference.SYSTEM -> isSystemInDarkTheme()
+        ThemePreference.LIGHT -> false
+        ThemePreference.DARK -> true
+    }
     val highContrastTextEnabled = rememberSystemHighContrastTextEnabled()
     val typography = MaterialTheme.typography.copy(
         headlineLarge = TextStyle(

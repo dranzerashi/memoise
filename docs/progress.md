@@ -204,3 +204,17 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Checklist row alignment
 
 - Centered checklist text within its touch area so it aligns vertically with the checkbox. The debug build assembles successfully.
+
+## 2026-11-08 — End date for repeating entries
+
+- Added an end-date picker to the repeating entry and used the existing series end field to stop generating dates beyond it. Existing entries are preserved, and the end date can be cleared with **Never**. No database migration was needed.
+
+## 2026-11-08 — Repeat setup and source removal choices
+
+- Reworked first-time repeat setup so frequency and end date are saved together before occurrence generation begins. Existing end-date changes use an explicit **Apply changes** action.
+- Added a choice when removing the first entry: keep remaining repeats, or remove all repeats and their saved details.
+
+## 2026-11-08 — Appearance preference
+
+- Added **System default**, **Light**, and **Dark** choices in Settings, persisted with Preferences DataStore and applied across the app. Android’s high-contrast text preference continues to adjust the light palette.
+- `./gradlew assembleDebug` completed successfully. The combined recurrence and appearance build is ready for device verification.

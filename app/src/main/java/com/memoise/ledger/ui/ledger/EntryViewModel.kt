@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.memoise.ledger.data.repository.EntryRepository
+import com.memoise.ledger.data.preferences.ThemePreference
+import com.memoise.ledger.data.preferences.UserPreferencesRepository
 import com.memoise.ledger.domain.model.DatePurpose
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.LedgerEntry
@@ -41,6 +43,7 @@ import kotlinx.coroutines.withContext
 @HiltViewModel
 class EntryViewModel @Inject constructor(
     private val repository: EntryRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
     private var pendingRestoreJson: String? = null
@@ -50,6 +53,15 @@ class EntryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
     )
+    val themePreference: StateFlow<ThemePreference> = userPreferencesRepository.themePreference.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = ThemePreference.SYSTEM,
+    )
+
+    fun setThemePreference(preference: ThemePreference) {
+        viewModelScope.launch { userPreferencesRepository.setThemePreference(preference) }
+    }
 
     fun searchEntries(
         query: String,
@@ -214,8 +226,12 @@ class EntryViewModel @Inject constructor(
     fun recurrenceFor(seriesId: String?): Flow<LedgerRecurrenceSeries?> =
         seriesId?.let(repository::observeRecurrence) ?: flowOf(null)
 
-    fun createRecurrence(entryId: String, frequency: RecurrenceFrequency) {
-        viewModelScope.launch { repository.createRecurrence(entryId, frequency) }
+    fun createRecurrence(entryId: String, frequency: RecurrenceFrequency, endDate: LocalDate?) {
+        viewModelScope.launch { repository.createRecurrence(entryId, frequency, endDate) }
+    }
+
+    fun setRecurrenceEndDate(entryId: String, endDate: LocalDate?) {
+        viewModelScope.launch { repository.setRecurrenceEndDate(entryId, endDate) }
     }
 
     fun stopRecurrence(entryId: String) {
@@ -224,6 +240,10 @@ class EntryViewModel @Inject constructor(
 
     fun skipRecurrenceOccurrence(entryId: String) {
         viewModelScope.launch { repository.skipRecurrenceOccurrence(entryId) }
+    }
+
+    fun deleteRecurrenceSeries(entryId: String) {
+        viewModelScope.launch { repository.deleteRecurrenceSeries(entryId) }
     }
 
     fun addChecklistItem(entryId: String, title: String) {

@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
 import com.memoise.ledger.ui.ledger.EntryViewModel
 import com.memoise.ledger.ui.ledger.MemoiseApp
 import com.memoise.ledger.ui.theme.MemoiseTheme
@@ -24,7 +26,8 @@ class MainActivity : ComponentActivity() {
             ?.getStringExtra(EXTRA_ENTRY_ID)
         enableEdgeToEdge()
         setContent {
-            MemoiseTheme {
+            val themePreference by entryViewModel.themePreference.collectAsStateWithLifecycle()
+            MemoiseTheme(themePreference = themePreference) {
                 MemoiseApp(
                     viewModel = entryViewModel,
                     openQuickCapture = openQuickCapture.value,

@@ -119,9 +119,11 @@ interface EntryRepository {
     )
     suspend fun setReminderEnabled(reminder: LedgerReminder, enabled: Boolean)
     suspend fun deleteReminder(reminderId: String)
-    suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency)
+    suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency, endDate: LocalDate?)
+    suspend fun setRecurrenceEndDate(entryId: String, endDate: LocalDate?)
     suspend fun stopRecurrence(entryId: String)
     suspend fun skipRecurrenceOccurrence(entryId: String)
+    suspend fun deleteRecurrenceSeries(entryId: String)
     suspend fun delete(id: String)
 }
 
@@ -1063,12 +1065,19 @@ class RoomEntryRepository @Inject constructor(
         inherited.forEach { reminderScheduler.cancel(it.id) }
     }
 
-    override suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency) {
+    override suspend fun createRecurrence(
+        entryId: String,
+        frequency: RecurrenceFrequency,
+        endDate: LocalDate?,
+    ) {
         val now = System.currentTimeMillis()
         val series = database.withTransaction {
             val entry = entryDao.findById(entryId) ?: return@withTransaction null
             val startsOn = checkNotNull(entry.scheduledDate) {
                 "Add a date before setting a recurrence."
+            }
+            check(endDate == null || !endDate.isBefore(startsOn)) {
+                "The repeat end date must be on or after the first date."
             }
             check(entry.recurrenceSeriesId == null) { "This entry is already part of a recurrence series." }
             val series = RecurrenceSeriesEntity(
@@ -1079,7 +1088,7 @@ class RoomEntryRepository @Inject constructor(
                     .put("interval", 1)
                     .toString(),
                 startsOn = startsOn.toEpochDay(),
-                endsOn = null,
+                endsOn = endDate?.toEpochDay(),
                 timeZoneId = ZoneId.systemDefault().id,
                 active = true,
                 createdAt = now,
@@ -1091,6 +1100,57 @@ class RoomEntryRepository @Inject constructor(
             series
         } ?: return
         generateOccurrences(series)
+    }
+
+    override suspend fun setRecurrenceEndDate(entryId: String, endDate: LocalDate?) {
+        val updatedSeries = database.withTransaction {
+            val entry = entryDao.findById(entryId) ?: return@withTransaction null
+            val seriesId = entry.recurrenceSeriesId ?: return@withTransaction null
+            val series = recurrenceDao.findById(seriesId) ?: return@withTransaction null
+            val source = entryDao.findByRecurrenceSeries(seriesId)
+                .minByOrNull { it.createdAt }
+                ?: return@withTransaction null
+            check(source.id == entryId) { "Only the first entry can change the repeat end date." }
+            check(series.active) { "This series has stopped repeating." }
+            check(endDate == null || endDate.toEpochDay() >= series.startsOn) {
+                "The repeat end date must be on or after the first date."
+            }
+            val updated = series.copy(
+                endsOn = endDate?.toEpochDay(),
+                updatedAt = System.currentTimeMillis(),
+            )
+            recurrenceDao.upsert(updated)
+            val endDateLabel = endDate?.format(
+                java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
+                    .withLocale(Locale.getDefault()),
+            ) ?: "Never"
+            recordActivity(
+                entryId,
+                "Repeat end date changed",
+                endDateLabel,
+            )
+            updated
+        } ?: return
+        generateOccurrences(updatedSeries)
+    }
+
+    override suspend fun deleteRecurrenceSeries(entryId: String) {
+        val reminderIds = database.withTransaction {
+            val entry = entryDao.findById(entryId) ?: return@withTransaction emptyList()
+            val seriesId = entry.recurrenceSeriesId ?: return@withTransaction emptyList()
+            val series = recurrenceDao.findById(seriesId) ?: return@withTransaction emptyList()
+            val members = entryDao.findByRecurrenceSeries(seriesId)
+            check(members.minByOrNull { it.createdAt }?.id == entryId) {
+                "Only the first entry can remove the whole repeat series."
+            }
+            val reminders = members.flatMap { member ->
+                reminderDao.allForEntry(member.id).map(EntryReminderEntity::id)
+            }
+            members.forEach { member -> entryDao.deleteById(member.id) }
+            recurrenceDao.deleteById(seriesId)
+            reminders
+        }
+        reminderIds.forEach(reminderScheduler::cancel)
     }
 
     override suspend fun skipRecurrenceOccurrence(entryId: String) {
