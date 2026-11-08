@@ -16,6 +16,15 @@ interface EntryReminderDao {
     @Query("SELECT * FROM entry_reminders WHERE entryId = :entryId AND enabled = 1")
     suspend fun enabledForEntry(entryId: String): List<EntryReminderEntity>
 
+    @Query(
+        """SELECT reminder.* FROM entry_reminders AS reminder
+            JOIN ledger_entries AS entry ON entry.id = reminder.entryId
+            WHERE reminder.enabled = 1
+              AND reminder.triggerAt > :now
+              AND entry.status NOT IN ('COMPLETED', 'CANCELLED')""",
+    )
+    suspend fun enabledUpcoming(now: Long): List<EntryReminderEntity>
+
     @Query("SELECT * FROM entry_reminders WHERE entryId = :entryId")
     suspend fun allForEntry(entryId: String): List<EntryReminderEntity>
 

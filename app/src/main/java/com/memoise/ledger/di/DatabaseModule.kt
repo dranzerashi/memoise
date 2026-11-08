@@ -32,18 +32,7 @@ object DatabaseModule {
         context,
         MemoiseDatabase::class.java,
         "memoise-ledger.db",
-    ).addMigrations(
-        MemoiseDatabase.MIGRATION_1_2,
-        MemoiseDatabase.MIGRATION_2_3,
-        MemoiseDatabase.MIGRATION_3_4,
-        MemoiseDatabase.MIGRATION_4_5,
-        MemoiseDatabase.MIGRATION_5_6,
-        MemoiseDatabase.MIGRATION_6_7,
-        MemoiseDatabase.MIGRATION_7_8,
-        MemoiseDatabase.MIGRATION_8_9,
-        MemoiseDatabase.MIGRATION_9_10,
-        MemoiseDatabase.MIGRATION_10_11,
-    ).build()
+    ).addMigrations(*MemoiseDatabase.ALL_MIGRATIONS).build()
 
     @Provides
     fun provideEntryDao(database: MemoiseDatabase): EntryDao = database.entryDao()

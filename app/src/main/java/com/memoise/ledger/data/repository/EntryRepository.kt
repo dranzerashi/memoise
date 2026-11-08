@@ -388,18 +388,7 @@ class RoomEntryRepository @Inject constructor(
         snapshot.copyTo(importerFile, overwrite = true)
         val importer = try {
             Room.databaseBuilder(context, MemoiseDatabase::class.java, importerName)
-                .addMigrations(
-                    MemoiseDatabase.MIGRATION_1_2,
-                    MemoiseDatabase.MIGRATION_2_3,
-                    MemoiseDatabase.MIGRATION_3_4,
-                    MemoiseDatabase.MIGRATION_4_5,
-                    MemoiseDatabase.MIGRATION_5_6,
-                    MemoiseDatabase.MIGRATION_6_7,
-                    MemoiseDatabase.MIGRATION_7_8,
-                    MemoiseDatabase.MIGRATION_8_9,
-                    MemoiseDatabase.MIGRATION_9_10,
-                    MemoiseDatabase.MIGRATION_10_11,
-                )
+                .addMigrations(*MemoiseDatabase.ALL_MIGRATIONS)
                 .build()
         } catch (error: Exception) {
             importerFile.delete()
@@ -643,7 +632,10 @@ class RoomEntryRepository @Inject constructor(
     }
 
     override fun observeEntries(): Flow<List<LedgerEntry>> = entryDao.observeAll()
-        .onStart { maintainRecurrenceWindow() }
+        .onStart {
+            maintainRecurrenceWindow()
+            scheduleUpcomingReminders()
+        }
         .map { entries -> entries.map(EntryEntity::toDomain) }
 
     override fun observeRelationships(entryId: String): Flow<List<LedgerRelationship>> =
@@ -1120,6 +1112,12 @@ class RoomEntryRepository @Inject constructor(
 
     private suspend fun maintainRecurrenceWindow() {
         for (series in recurrenceDao.findActive()) generateOccurrences(series)
+    }
+
+    private suspend fun scheduleUpcomingReminders() {
+        reminderDao.enabledUpcoming(System.currentTimeMillis()).forEach { reminder ->
+            reminderScheduler.schedule(reminder.id, reminder.triggerAt)
+        }
     }
 
     private suspend fun syncInheritedReminderIfTemplate(

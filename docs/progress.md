@@ -157,3 +157,11 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Quick capture widget and launcher shortcut
 
 - Added a small Memoise-styled plus widget and an app-icon shortcut; both open the existing quick-capture screen directly. The debug build is ready for Pixel verification.
+
+## 2026-11-08 — Reminder worker database recovery
+
+- Centralized Room migrations so the background notification worker opens the current database schema. On app startup, future enabled reminders for active entries are scheduled again. The debug build is ready for Pixel verification.
+
+## 2026-11-08 — Pixel reminder worker verification
+
+- Confirmed on Pixel 7a: the background worker opened the version 11 database, returned success, and recorded the reminder as sent. Temporary test data and its notification were removed.
