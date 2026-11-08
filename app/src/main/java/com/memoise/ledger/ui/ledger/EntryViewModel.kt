@@ -222,6 +222,10 @@ class EntryViewModel @Inject constructor(
         viewModelScope.launch { repository.stopRecurrence(entryId) }
     }
 
+    fun skipRecurrenceOccurrence(entryId: String) {
+        viewModelScope.launch { repository.skipRecurrenceOccurrence(entryId) }
+    }
+
     fun addChecklistItem(entryId: String, title: String) {
         viewModelScope.launch { repository.addChecklistItem(entryId, title) }
     }

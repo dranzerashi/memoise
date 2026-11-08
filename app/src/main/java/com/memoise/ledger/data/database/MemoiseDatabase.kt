@@ -17,8 +17,9 @@ import androidx.room.TypeConverters
         EntryReminderEntity::class,
         RecurrenceSeriesEntity::class,
         EntrySearchFtsEntity::class,
+        RecurrenceExceptionEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 @TypeConverters(EntryConverters::class)
@@ -32,6 +33,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
     abstract fun entryReminderDao(): EntryReminderDao
     abstract fun recurrenceSeriesDao(): RecurrenceSeriesDao
     abstract fun entrySearchDao(): EntrySearchDao
+    abstract fun recurrenceExceptionDao(): RecurrenceExceptionDao
     abstract fun ledgerBackupDao(): LedgerBackupDao
 
     companion object {
@@ -246,6 +248,45 @@ abstract class MemoiseDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `recurrence_exceptions` (
+                        `id` TEXT NOT NULL,
+                        `recurrenceSeriesId` TEXT NOT NULL,
+                        `occurrenceDate` INTEGER NOT NULL,
+                        `exceptionType` TEXT NOT NULL,
+                        `modifiedDate` INTEGER,
+                        `occurrenceEntryId` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`recurrenceSeriesId`) REFERENCES `recurrence_series`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_recurrence_exceptions_recurrenceSeriesId_occurrenceDate` ON `recurrence_exceptions` (`recurrenceSeriesId`, `occurrenceDate`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_recurrence_exceptions_occurrenceEntryId` ON `recurrence_exceptions` (`occurrenceEntryId`)",
+                )
+                db.execSQL(
+                    """INSERT INTO `recurrence_exceptions`
+                        (`id`, `recurrenceSeriesId`, `occurrenceDate`, `exceptionType`, `modifiedDate`, `occurrenceEntryId`, `createdAt`)
+                        SELECT lower(hex(randomblob(16))), occurrence.`recurrenceSeriesId`, occurrence.`scheduledDate`,
+                            'SKIPPED', NULL, occurrence.`id`, occurrence.`updatedAt`
+                        FROM `ledger_entries` AS occurrence
+                        WHERE occurrence.`recurrenceSeriesId` IS NOT NULL
+                          AND occurrence.`scheduledDate` IS NOT NULL
+                          AND occurrence.`status` = 'CANCELLED'
+                          AND occurrence.`id` <> (
+                            SELECT candidate.`id` FROM `ledger_entries` AS candidate
+                            WHERE candidate.`recurrenceSeriesId` = occurrence.`recurrenceSeriesId`
+                            ORDER BY candidate.`createdAt` ASC, candidate.`id` ASC LIMIT 1
+                          )""".trimIndent(),
+                )
+            }
+        }
+
         private val SEARCH_INDEX_TRIGGERS = listOf(
             """CREATE TRIGGER `ledger_search_entry_insert` AFTER INSERT ON `ledger_entries` BEGIN
                 INSERT OR REPLACE INTO `ledger_search_fts`
@@ -388,6 +429,7 @@ abstract class MemoiseDatabase : RoomDatabase() {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
     }
 }

@@ -169,3 +169,12 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Skip one recurring entry
 
 - Added **Skip this one** for active future occurrences. It marks only that entry cancelled; it and the other occurrences remain in the same series. Confirmed on Pixel 7a with a monthly series containing multiple future entries.
+
+## 2026-11-08 — Recurrence exceptions
+
+- Added per-series exceptions for skipped and moved occurrences. The generator now respects them; date changes return to normal generation when moved back to the original date. Added Room migration 11→12 and preserved exceptions in JSON and database backups. The debug build is ready for Pixel verification.
+- Migration also records already-cancelled occurrences as skipped exceptions so deleting one later will not recreate it.
+
+## 2026-11-08 — Pixel recurrence exception verification
+
+- Confirmed on Pixel that a moved monthly occurrence stays on its new date after reopening and is not recreated on the original date.

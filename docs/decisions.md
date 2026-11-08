@@ -25,3 +25,7 @@ Represent source-to-occurrence links in the existing entry relationship graph us
 ## D-006 — Skipping one occurrence
 
 Use the occurrence’s existing cancelled status; keep the entry and its history, and let the rest of the series continue.
+
+## D-007 — Recurrence exceptions
+
+Store skipped and moved occurrence dates under their existing series so generation cannot recreate an overridden date; keep occurrence links in the existing relationship graph.

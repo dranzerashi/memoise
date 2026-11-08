@@ -9,6 +9,7 @@ import com.memoise.ledger.data.database.EntryDescriptionBlockDao
 import com.memoise.ledger.data.database.EntryNoteDao
 import com.memoise.ledger.data.database.EntryReminderDao
 import com.memoise.ledger.data.database.RecurrenceSeriesDao
+import com.memoise.ledger.data.database.RecurrenceExceptionDao
 import com.memoise.ledger.data.database.EntryRelationshipDao
 import com.memoise.ledger.data.database.MemoiseDatabase
 import com.memoise.ledger.data.repository.EntryRepository
@@ -61,6 +62,10 @@ object DatabaseModule {
 
     @Provides
     fun provideRecurrenceSeriesDao(database: MemoiseDatabase): RecurrenceSeriesDao = database.recurrenceSeriesDao()
+
+    @Provides
+    fun provideRecurrenceExceptionDao(database: MemoiseDatabase): RecurrenceExceptionDao =
+        database.recurrenceExceptionDao()
 }
 
 @Module

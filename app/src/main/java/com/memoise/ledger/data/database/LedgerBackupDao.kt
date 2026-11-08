@@ -28,6 +28,9 @@ interface LedgerBackupDao {
     @Query("DELETE FROM recurrence_series")
     suspend fun clearRecurrenceSeries()
 
+    @Query("DELETE FROM recurrence_exceptions")
+    suspend fun clearRecurrenceExceptions()
+
     @Query("DELETE FROM ledger_entries")
     suspend fun clearEntries()
 
@@ -55,6 +58,9 @@ interface LedgerBackupDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertRecurrenceSeries(items: List<RecurrenceSeriesEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRecurrenceExceptions(items: List<RecurrenceExceptionEntity>)
+
     @Query("SELECT * FROM ledger_entries ORDER BY createdAt, id")
     suspend fun entries(): List<EntryEntity>
 
@@ -78,4 +84,7 @@ interface LedgerBackupDao {
 
     @Query("SELECT * FROM recurrence_series ORDER BY createdAt, id")
     suspend fun recurrenceSeries(): List<RecurrenceSeriesEntity>
+
+    @Query("SELECT * FROM recurrence_exceptions ORDER BY recurrenceSeriesId, occurrenceDate")
+    suspend fun recurrenceExceptions(): List<RecurrenceExceptionEntity>
 }

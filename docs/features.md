@@ -10,6 +10,8 @@ This document records current product behavior. User-facing explanations will be
 - Stopping a series preserves its source and all occurrences already created. No further occurrences are generated.
 - Completing or cancelling an occurrence affects only that entry; the series continues.
 - **Skip this one** marks a future occurrence cancelled and leaves the other repeats unchanged.
+- Skipped entries and one-off date changes are kept as exceptions to the series, so Memoise will not recreate the original occurrence after it is skipped, moved, or removed. Moving an occurrence back to its original date clears that exception.
+- Repeat exceptions are included in both JSON exports and full database backups.
 - Editing an occurrence’s title, date, status, notes, or relationships does not change other occurrences. Editing the source does not rewrite occurrences already created.
 - If the source entry is deleted, the oldest remaining occurrence becomes the source and the active series continues. If there are no remaining occurrences, the series stops.
 

@@ -22,6 +22,9 @@ import com.memoise.ledger.data.database.EntryRelationshipEntity
 import com.memoise.ledger.data.database.MemoiseDatabase
 import com.memoise.ledger.data.database.RecurrenceSeriesDao
 import com.memoise.ledger.data.database.RecurrenceSeriesEntity
+import com.memoise.ledger.data.database.RecurrenceExceptionDao
+import com.memoise.ledger.data.database.RecurrenceExceptionEntity
+import com.memoise.ledger.data.database.RecurrenceExceptionType
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerActivity
 import com.memoise.ledger.domain.model.LedgerChecklistItem
@@ -118,6 +121,7 @@ interface EntryRepository {
     suspend fun deleteReminder(reminderId: String)
     suspend fun createRecurrence(entryId: String, frequency: RecurrenceFrequency)
     suspend fun stopRecurrence(entryId: String)
+    suspend fun skipRecurrenceOccurrence(entryId: String)
     suspend fun delete(id: String)
 }
 
@@ -133,6 +137,7 @@ class RoomEntryRepository @Inject constructor(
     private val noteDao: EntryNoteDao,
     private val reminderDao: EntryReminderDao,
     private val recurrenceDao: RecurrenceSeriesDao,
+    private val recurrenceExceptionDao: RecurrenceExceptionDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
     override suspend fun createDatabaseSnapshot(): File {
@@ -272,6 +277,19 @@ class RoomEntryRepository @Inject constructor(
                 })
             }
         })
+        data.put("recurrenceExceptions", JSONArray().apply {
+            backupDao.recurrenceExceptions().forEach { exception ->
+                put(JSONObject().apply {
+                    put("id", exception.id)
+                    put("recurrenceSeriesId", exception.recurrenceSeriesId)
+                    put("occurrenceDate", LocalDate.ofEpochDay(exception.occurrenceDate).toString())
+                    put("type", exception.exceptionType)
+                    putNullable("modifiedDate", exception.modifiedDate?.let(LocalDate::ofEpochDay)?.toString())
+                    putNullable("occurrenceEntryId", exception.occurrenceEntryId)
+                    put("createdAt", exception.createdAt)
+                })
+            }
+        })
 
         val dataText = data.toString()
         val digest = MessageDigest.getInstance("SHA-256")
@@ -279,7 +297,7 @@ class RoomEntryRepository @Inject constructor(
             .joinToString("") { "%02x".format(Locale.ROOT, it) }
         val manifest = JSONObject()
             .put("format", "memoise-personal-ledger")
-            .put("backupSchemaVersion", 1)
+            .put("backupSchemaVersion", 2)
             .put("applicationId", BuildConfig.APPLICATION_ID)
             .put("applicationVersion", BuildConfig.VERSION_NAME)
             .put("databaseSchemaVersion", database.openHelper.readableDatabase.version)
@@ -305,6 +323,7 @@ class RoomEntryRepository @Inject constructor(
         val previousReminderIds = backupDao.reminders().map(EntryReminderEntity::id)
         database.withTransaction {
             backupDao.clearRelationships()
+            backupDao.clearRecurrenceExceptions()
             backupDao.clearReminders()
             backupDao.clearNotes()
             backupDao.clearDescriptionBlocks()
@@ -314,6 +333,7 @@ class RoomEntryRepository @Inject constructor(
             backupDao.clearRecurrenceSeries()
 
             backupDao.insertRecurrenceSeries(backup.recurrenceSeries)
+            backupDao.insertRecurrenceExceptions(backup.recurrenceExceptions)
             backupDao.insertEntries(backup.entries)
             backupDao.insertRelationships(backup.relationships)
             backupDao.insertDescriptionBlocks(backup.descriptionBlocks)
@@ -349,7 +369,7 @@ class RoomEntryRepository @Inject constructor(
             }
             val actualVersion = checkedDatabase.version
             val expectedVersion = database.openHelper.writableDatabase.version
-            require(actualVersion == expectedVersion) {
+            require(actualVersion in 1..expectedVersion) {
                 "This database backup is from an incompatible Memoise version. Use a JSON backup instead."
             }
             val hasForeignKeyViolations = checkedDatabase.rawQuery("PRAGMA foreign_key_check", null).use {
@@ -366,7 +386,7 @@ class RoomEntryRepository @Inject constructor(
                 "entry_reminders",
                 "recurrence_series",
                 "ledger_search_fts",
-            )
+            ) + if (actualVersion >= 12) setOf("recurrence_exceptions") else emptySet()
             val foundTables = checkedDatabase.rawQuery(
                 "SELECT name FROM sqlite_master WHERE type = 'table'",
                 null,
@@ -416,6 +436,7 @@ class RoomEntryRepository @Inject constructor(
                     activities = backupDao.activities(),
                     reminders = backupDao.reminders(),
                     recurrenceSeries = backupDao.recurrenceSeries(),
+                    recurrenceExceptions = backupDao.recurrenceExceptions(),
                 ),
             )
         } finally {
@@ -432,7 +453,8 @@ class RoomEntryRepository @Inject constructor(
         require(manifest.getString("format") == "memoise-personal-ledger") {
             "This file is not a Memoise ledger export."
         }
-        require(manifest.getInt("backupSchemaVersion") == 1) {
+        val backupSchemaVersion = manifest.getInt("backupSchemaVersion")
+        require(backupSchemaVersion in 1..2) {
             "This backup format is not supported by this version of Memoise."
         }
         val data = root.getJSONObject("data")
@@ -539,6 +561,17 @@ class RoomEntryRepository @Inject constructor(
                 updatedAt = row.getLong("updatedAt"),
             )
         }
+        val recurrenceExceptions = (data.optJSONArray("recurrenceExceptions") ?: JSONArray()).objects().map { row ->
+            RecurrenceExceptionEntity(
+                id = row.getString("id"),
+                recurrenceSeriesId = row.getString("recurrenceSeriesId"),
+                occurrenceDate = LocalDate.parse(row.getString("occurrenceDate")).toEpochDay(),
+                exceptionType = row.getString("type"),
+                modifiedDate = row.nullableString("modifiedDate")?.let(LocalDate::parse)?.toEpochDay(),
+                occurrenceEntryId = row.nullableString("occurrenceEntryId"),
+                createdAt = row.getLong("createdAt"),
+            )
+        }
 
         val preview = LedgerRestorePreview(
             entryCount = entries.size,
@@ -556,6 +589,7 @@ class RoomEntryRepository @Inject constructor(
                 activities = activities,
                 reminders = reminders,
                 recurrenceSeries = recurrenceSeries,
+                recurrenceExceptions = recurrenceExceptions,
             ),
         )
     }
@@ -571,6 +605,7 @@ class RoomEntryRepository @Inject constructor(
         requireUniqueRecords(backup.activities, EntryActivityEntity::id)
         requireUniqueRecords(backup.reminders, EntryReminderEntity::id)
         requireUniqueRecords(backup.recurrenceSeries, RecurrenceSeriesEntity::id)
+        requireUniqueRecords(backup.recurrenceExceptions, RecurrenceExceptionEntity::id)
         require(backup.entries.all { it.title.isNotBlank() }) {
             "This backup contains an entry with no title."
         }
@@ -593,6 +628,19 @@ class RoomEntryRepository @Inject constructor(
         require(backup.reminders.all {
             it.parentReminderId == null || backup.reminders.any { parent -> parent.id == it.parentReminderId }
         }) { "This backup contains a reminder that refers to a missing reminder." }
+        require(backup.recurrenceExceptions.all { it.recurrenceSeriesId in seriesIds }) {
+            "This backup contains a repeat exception for a missing series."
+        }
+        require(backup.recurrenceExceptions.all { exception ->
+            val type = runCatching { RecurrenceExceptionType.valueOf(exception.exceptionType) }.getOrNull()
+            type != null && (type != RecurrenceExceptionType.SKIPPED || exception.modifiedDate == null)
+        }) { "This backup contains an invalid repeat exception." }
+        val exceptionKeys = backup.recurrenceExceptions.map {
+            "${it.recurrenceSeriesId}|${it.occurrenceDate}"
+        }
+        require(exceptionKeys.toSet().size == exceptionKeys.size) {
+            "This backup contains duplicate repeat exceptions."
+        }
         val relationshipKeys = backup.relationships.map {
             "${it.sourceEntryId}|${it.targetEntryId}|${it.relationshipType}"
         }
@@ -671,7 +719,14 @@ class RoomEntryRepository @Inject constructor(
     }
 
     override suspend fun save(entry: LedgerEntry) {
-        entryDao.upsert(entry.toEntity())
+        database.withTransaction {
+            val previous = entryDao.findById(entry.id)
+            val updated = entry.toEntity()
+            if (previous != null && previous.scheduledDate != updated.scheduledDate) {
+                saveOccurrenceDateException(previous, updated)
+            }
+            entryDao.upsert(updated)
+        }
         refreshEnabledReminders(entry)
     }
 
@@ -686,6 +741,11 @@ class RoomEntryRepository @Inject constructor(
                     completedAt = if (status == EntryStatus.COMPLETED) now else null,
                 ).toEntity(),
             )
+            if (status != EntryStatus.CANCELLED) {
+                recurrenceExceptionDao.forOccurrence(entry.id)
+                    ?.takeIf { it.exceptionType == RecurrenceExceptionType.SKIPPED.name }
+                    ?.let { recurrenceExceptionDao.deleteById(it.id) }
+            }
             recordActivity(
                 entry.id,
                 "Status changed",
@@ -1033,6 +1093,74 @@ class RoomEntryRepository @Inject constructor(
         generateOccurrences(series)
     }
 
+    override suspend fun skipRecurrenceOccurrence(entryId: String) {
+        val now = System.currentTimeMillis()
+        val skipped = database.withTransaction {
+            val entry = entryDao.findById(entryId) ?: return@withTransaction null
+            val seriesId = entry.recurrenceSeriesId ?: return@withTransaction null
+            val series = recurrenceDao.findById(seriesId) ?: return@withTransaction null
+            check(series.active) { "This series has stopped repeating." }
+            check(entry.status != EntryStatus.COMPLETED && entry.status != EntryStatus.CANCELLED) {
+                "This entry has already been finished or skipped."
+            }
+            val sourceId = entryDao.findByRecurrenceSeries(seriesId)
+                .minByOrNull { it.createdAt }
+                ?.id
+            check(sourceId != entry.id) { "The first entry cannot be skipped as an occurrence." }
+            val occurrenceDate = recurrenceExceptionDao.forOccurrence(entry.id)?.occurrenceDate
+                ?: entry.scheduledDate?.toEpochDay()
+                ?: return@withTransaction null
+            val existing = recurrenceExceptionDao.forOccurrence(entry.id)
+            recurrenceExceptionDao.upsert(
+                RecurrenceExceptionEntity(
+                    id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                    recurrenceSeriesId = seriesId,
+                    occurrenceDate = occurrenceDate,
+                    exceptionType = RecurrenceExceptionType.SKIPPED.name,
+                    modifiedDate = null,
+                    occurrenceEntryId = entry.id,
+                    createdAt = existing?.createdAt ?: now,
+                ),
+            )
+            val updated = entry.copy(
+                status = EntryStatus.CANCELLED,
+                updatedAt = now,
+                completedAt = null,
+            )
+            entryDao.upsert(updated)
+            recordActivity(entry.id, "Occurrence skipped", null, now)
+            updated
+        } ?: return
+        refreshEnabledReminders(skipped.toDomain())
+    }
+
+    private suspend fun saveOccurrenceDateException(previous: EntryEntity, updated: EntryEntity) {
+        val seriesId = previous.recurrenceSeriesId ?: return
+        val templateId = entryDao.findByRecurrenceSeries(seriesId)
+            .minByOrNull { it.createdAt }
+            ?.id
+        if (templateId == previous.id) return
+
+        val existing = recurrenceExceptionDao.forOccurrence(previous.id)
+        val originalDate = existing?.occurrenceDate ?: previous.scheduledDate?.toEpochDay() ?: return
+        val newDate = updated.scheduledDate?.toEpochDay()
+        if (newDate == originalDate) {
+            existing?.let { recurrenceExceptionDao.deleteById(it.id) }
+            return
+        }
+        recurrenceExceptionDao.upsert(
+            RecurrenceExceptionEntity(
+                id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                recurrenceSeriesId = seriesId,
+                occurrenceDate = originalDate,
+                exceptionType = RecurrenceExceptionType.MOVED.name,
+                modifiedDate = newDate,
+                occurrenceEntryId = previous.id,
+                createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            ),
+        )
+    }
+
     override suspend fun stopRecurrence(entryId: String) {
         database.withTransaction {
             val entry = entryDao.findById(entryId) ?: return@withTransaction
@@ -1197,6 +1325,8 @@ class RoomEntryRepository @Inject constructor(
         val horizon = today.plusMonths(12)
         val existing = entryDao.findByRecurrenceSeries(series.id)
         val existingDates = existing.mapNotNull { it.scheduledDate?.toEpochDay() }.toHashSet()
+        val exceptionDates = recurrenceExceptionDao.forSeries(series.id)
+            .mapTo(hashSetOf(), RecurrenceExceptionEntity::occurrenceDate)
         val template = existing.minByOrNull { it.createdAt } ?: return
         val templateDate = template.scheduledDate ?: return
         val inheritedReminders = reminderDao.allForEntry(template.id)
@@ -1213,7 +1343,7 @@ class RoomEntryRepository @Inject constructor(
             }
             if (date.isAfter(horizon) || (end != null && date.isAfter(end))) break
             val day = date.toEpochDay()
-            if (date.isAfter(today) && day !in existingDates) {
+            if (date.isAfter(today) && day !in existingDates && day !in exceptionDates) {
                 val occurrence = template.copy(
                     id = java.util.UUID.randomUUID().toString(),
                     status = EntryStatus.PENDING,
@@ -1387,6 +1517,7 @@ private data class LedgerBackupPayload(
     val activities: List<EntryActivityEntity>,
     val reminders: List<EntryReminderEntity>,
     val recurrenceSeries: List<RecurrenceSeriesEntity>,
+    val recurrenceExceptions: List<RecurrenceExceptionEntity> = emptyList(),
 )
 
 private fun EntryRelationshipEntity.toDomain() = LedgerRelationship(

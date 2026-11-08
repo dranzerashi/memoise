@@ -375,6 +375,7 @@ fun MemoiseApp(
                         onDeleteReminder = viewModel::deleteReminder,
                         onCreateRecurrence = viewModel::createRecurrence,
                         onStopRecurrence = viewModel::stopRecurrence,
+                        onSkipRecurrenceOccurrence = viewModel::skipRecurrenceOccurrence,
                         onConvertChecklistItems = { type, items ->
                             navController.navigate(
                                 "related-capture/${entry.id}/${type.name}?sourceChecklistItemIds=${items.joinToString(",") { it.id }}",
@@ -1321,6 +1322,7 @@ private fun EntryDetailScreen(
     onDeleteReminder: (LedgerReminder) -> Unit,
     onCreateRecurrence: (String, RecurrenceFrequency) -> Unit,
     onStopRecurrence: (String) -> Unit,
+    onSkipRecurrenceOccurrence: (String) -> Unit,
     onAddRelationship: (RelationshipType) -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onDelete: () -> Unit,
@@ -1451,7 +1453,7 @@ private fun EntryDetailScreen(
                     isRecurrenceTemplate = isRecurrenceTemplate,
                     onCreate = { frequency -> onCreateRecurrence(entry.id, frequency) },
                     onStop = { onStopRecurrence(entry.id) },
-                    onSkip = { onSetStatus(entry, EntryStatus.CANCELLED) },
+                    onSkip = { onSkipRecurrenceOccurrence(entry.id) },
                     onOpenSource = onOpenEntry,
                 )
                 if (entry.recurrenceSeriesId != null && isRecurrenceTemplate) {
