@@ -168,6 +168,16 @@ fun MemoiseApp(viewModel: EntryViewModel) {
             }
         }
     }
+    val restoreDatabaseDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.prepareDatabaseRestore(uri) { preview, error ->
+                restorePreview = preview
+                if (error != null) Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showPrimaryNavigation = currentRoute in setOf(
@@ -269,6 +279,9 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                     onChooseRestoreFile = {
                         restoreDocumentLauncher.launch(arrayOf("application/json", "text/json", "text/*"))
                     },
+                    onChooseDatabaseRestoreFile = {
+                        restoreDatabaseDocumentLauncher.launch(arrayOf("application/vnd.sqlite3", "application/octet-stream", "*/*"))
+                    },
                     restorePreview = restorePreview,
                     restoring = restoringBackup,
                     onDismissRestore = {
@@ -279,7 +292,7 @@ fun MemoiseApp(viewModel: EntryViewModel) {
                         restoringBackup = true
                         viewModel.restorePrepared { success, error ->
                             restoringBackup = false
-                            restorePreview = null
+                            if (success) restorePreview = null
                             Toast.makeText(
                                 context,
                                 if (success) "Ledger restored" else (error ?: "Could not restore this backup"),
@@ -889,6 +902,7 @@ private fun SettingsScreen(
     onExportJson: () -> Unit,
     onCreateDatabaseBackup: () -> Unit,
     onChooseRestoreFile: () -> Unit,
+    onChooseDatabaseRestoreFile: () -> Unit,
     restorePreview: LedgerRestorePreview?,
     restoring: Boolean,
     onDismissRestore: () -> Unit,
@@ -920,6 +934,13 @@ private fun SettingsScreen(
             enabled = !restoring,
         ) {
             Text("Restore from JSON")
+        }
+        TextButton(
+            onClick = onChooseDatabaseRestoreFile,
+            modifier = Modifier.padding(start = 26.dp),
+            enabled = !restoring,
+        ) {
+            Text("Restore full backup")
         }
         OutlinedButton(
             onClick = onCreateDatabaseBackup,

@@ -141,3 +141,15 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-07 — Full database backup
 
 - Added full SQLite snapshot export through the document picker. `VACUUM INTO` creates a consistent snapshot that includes committed WAL data; older SQLite versions are directed to JSON export. The debug build is ready for Pixel verification.
+
+## 2026-11-07 — Full database restore
+
+- Added full snapshot restore with SQLite integrity/schema checks, an entry/link preview, confirmation, and transactional table replacement. Search indexing is rebuilt through database triggers, and reminders are rescheduled.
+
+## 2026-11-08 — Full database restore compatibility
+
+- Removed the strict SQLite `integrity_check` gate after it rejected a snapshot that opens correctly on the OnePlus device. Restore still checks schema compatibility, foreign keys, record references, and applies changes transactionally.
+
+## 2026-11-08 — OnePlus restore integrity check
+
+- Kept the integrity gate and ran SQLite's check on the private writable import copy. OnePlus SQLite 3.44.5 then returned `ok` for the backup; the original file remains unchanged.

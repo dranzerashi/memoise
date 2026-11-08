@@ -1,6 +1,8 @@
 package com.memoise.ledger.data.repository
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import androidx.room.Room
 import androidx.room.withTransaction
 
 import com.memoise.ledger.data.database.EntryDao
@@ -63,7 +65,9 @@ interface EntryRepository {
     suspend fun exportJson(): String
     suspend fun createDatabaseSnapshot(): File
     suspend fun inspectBackup(json: String): LedgerRestorePreview
+    suspend fun inspectDatabaseBackup(snapshot: File): LedgerRestorePreview
     suspend fun restoreBackup(json: String): LedgerRestorePreview
+    suspend fun restoreDatabaseSnapshot(snapshot: File): LedgerRestorePreview
     fun searchEntries(
         query: String,
         status: EntryStatus?,
@@ -287,8 +291,16 @@ class RoomEntryRepository @Inject constructor(
     override suspend fun inspectBackup(json: String): LedgerRestorePreview =
         parseBackup(json).preview
 
-    override suspend fun restoreBackup(json: String): LedgerRestorePreview {
-        val backup = parseBackup(json)
+    override suspend fun inspectDatabaseBackup(snapshot: File): LedgerRestorePreview =
+        readDatabaseSnapshot(snapshot).preview
+
+    override suspend fun restoreBackup(json: String): LedgerRestorePreview =
+        applyRestore(parseBackup(json))
+
+    override suspend fun restoreDatabaseSnapshot(snapshot: File): LedgerRestorePreview =
+        applyRestore(readDatabaseSnapshot(snapshot))
+
+    private suspend fun applyRestore(backup: LedgerBackupPayload): LedgerRestorePreview {
         val backupDao = database.ledgerBackupDao()
         val previousReminderIds = backupDao.reminders().map(EntryReminderEntity::id)
         database.withTransaction {
@@ -319,6 +331,110 @@ class RoomEntryRepository @Inject constructor(
             }
         }
         return backup.preview
+    }
+
+    private suspend fun readDatabaseSnapshot(snapshot: File): LedgerBackupPayload {
+        require(snapshot.isFile && snapshot.length() > 0L) { "Choose a valid database backup file." }
+        val checkedDatabase = SQLiteDatabase.openDatabase(
+            snapshot.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READWRITE,
+        )
+        try {
+            val integrityRows = checkedDatabase.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+            }
+            require(integrityRows.size == 1 && integrityRows.single().equals("ok", ignoreCase = true)) {
+                "Memoise couldn't verify this database backup. Create a new backup and try again."
+            }
+            val actualVersion = checkedDatabase.version
+            val expectedVersion = database.openHelper.writableDatabase.version
+            require(actualVersion == expectedVersion) {
+                "This database backup is from an incompatible Memoise version. Use a JSON backup instead."
+            }
+            val hasForeignKeyViolations = checkedDatabase.rawQuery("PRAGMA foreign_key_check", null).use {
+                it.moveToFirst()
+            }
+            require(!hasForeignKeyViolations) { "This database backup has broken links." }
+            val expectedTables = setOf(
+                "ledger_entries",
+                "entry_relationships",
+                "entry_checklist_items",
+                "entry_activities",
+                "entry_description_blocks",
+                "entry_notes",
+                "entry_reminders",
+                "recurrence_series",
+                "ledger_search_fts",
+            )
+            val foundTables = checkedDatabase.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+                null,
+            ).use { cursor ->
+                buildSet {
+                    while (cursor.moveToNext()) add(cursor.getString(0))
+                }
+            }
+            require(foundTables.containsAll(expectedTables)) {
+                "This file is missing part of the Memoise database."
+            }
+        } finally {
+            checkedDatabase.close()
+        }
+
+        val importerName = "memoise-import-${java.util.UUID.randomUUID()}.db"
+        val importerFile = context.getDatabasePath(importerName)
+        importerFile.parentFile?.mkdirs()
+        snapshot.copyTo(importerFile, overwrite = true)
+        val importer = try {
+            Room.databaseBuilder(context, MemoiseDatabase::class.java, importerName)
+                .addMigrations(
+                    MemoiseDatabase.MIGRATION_1_2,
+                    MemoiseDatabase.MIGRATION_2_3,
+                    MemoiseDatabase.MIGRATION_3_4,
+                    MemoiseDatabase.MIGRATION_4_5,
+                    MemoiseDatabase.MIGRATION_5_6,
+                    MemoiseDatabase.MIGRATION_6_7,
+                    MemoiseDatabase.MIGRATION_7_8,
+                    MemoiseDatabase.MIGRATION_8_9,
+                    MemoiseDatabase.MIGRATION_9_10,
+                    MemoiseDatabase.MIGRATION_10_11,
+                )
+                .build()
+        } catch (error: Exception) {
+            importerFile.delete()
+            File(importerFile.absolutePath + "-wal").delete()
+            File(importerFile.absolutePath + "-shm").delete()
+            throw error
+        }
+        try {
+            val backupDao = importer.ledgerBackupDao()
+            val entries = backupDao.entries()
+            val relationships = backupDao.relationships()
+            val preview = LedgerRestorePreview(
+                entryCount = entries.size,
+                relationshipCount = relationships.size,
+                exportedAt = Instant.ofEpochMilli(snapshot.lastModified()).toString(),
+            )
+            return validateBackupPayload(
+                LedgerBackupPayload(
+                    preview = preview,
+                    entries = entries,
+                    relationships = relationships,
+                    descriptionBlocks = backupDao.descriptionBlocks(),
+                    checklistItems = backupDao.checklistItems(),
+                    notes = backupDao.notes(),
+                    activities = backupDao.activities(),
+                    reminders = backupDao.reminders(),
+                    recurrenceSeries = backupDao.recurrenceSeries(),
+                ),
+            )
+        } finally {
+            importer.close()
+            importerFile.delete()
+            File(importerFile.absolutePath + "-wal").delete()
+            File(importerFile.absolutePath + "-shm").delete()
+        }
     }
 
     private fun parseBackup(json: String): LedgerBackupPayload {
@@ -435,61 +551,66 @@ class RoomEntryRepository @Inject constructor(
             )
         }
 
-        val entryIds = entries.map(EntryEntity::id).toSet()
-        val seriesIds = recurrenceSeries.map(RecurrenceSeriesEntity::id).toSet()
-        requireUniqueRecords(entries, EntryEntity::id)
-        requireUniqueRecords(relationships, EntryRelationshipEntity::id)
-        requireUniqueRecords(descriptionBlocks, EntryDescriptionBlockEntity::id)
-        requireUniqueRecords(checklistItems, EntryChecklistEntity::id)
-        requireUniqueRecords(notes, EntryNoteEntity::id)
-        requireUniqueRecords(activities, EntryActivityEntity::id)
-        requireUniqueRecords(reminders, EntryReminderEntity::id)
-        requireUniqueRecords(recurrenceSeries, RecurrenceSeriesEntity::id)
-        require(entries.all { it.title.isNotBlank() }) {
-            "This backup contains an entry with no title."
-        }
-        require(entryIds.size == entries.size && seriesIds.size == recurrenceSeries.size) {
-            "This backup contains duplicate records."
-        }
-        require(entries.all { it.recurrenceSeriesId == null || it.recurrenceSeriesId in seriesIds }) {
-            "This backup refers to a missing repeat rule."
-        }
-        require(relationships.all { it.sourceEntryId in entryIds && it.targetEntryId in entryIds }) {
-            "This backup contains a link to a missing entry."
-        }
-        require(relationships.none { it.sourceEntryId == it.targetEntryId }) {
-            "This backup contains a link from an entry to itself."
-        }
-        require(descriptionBlocks.all { it.entryId in entryIds } && notes.all { it.entryId in entryIds } &&
-            activities.all { it.entryId in entryIds } && reminders.all { it.entryId in entryIds }
-        ) { "This backup contains details for a missing entry." }
-        require(checklistItems.all {
-            it.entryId in entryIds && (it.linkedEntryId == null || it.linkedEntryId in entryIds)
-        }) { "This backup contains a checklist link to a missing entry." }
-        require(reminders.all { it.parentReminderId == null || reminders.any { parent -> parent.id == it.parentReminderId } }) {
-            "This backup contains a reminder that refers to a missing reminder."
-        }
-        val relationshipKeys = relationships.map { "${it.sourceEntryId}|${it.targetEntryId}|${it.relationshipType}" }
-        require(relationshipKeys.toSet().size == relationshipKeys.size) {
-            "This backup contains duplicate links."
-        }
-
         val preview = LedgerRestorePreview(
             entryCount = entries.size,
             relationshipCount = relationships.size,
             exportedAt = manifest.getString("exportedAt"),
         )
-        return LedgerBackupPayload(
-            preview = preview,
-            entries = entries,
-            relationships = relationships,
-            descriptionBlocks = descriptionBlocks,
-            checklistItems = checklistItems,
-            notes = notes,
-            activities = activities,
-            reminders = reminders,
-            recurrenceSeries = recurrenceSeries,
+        return validateBackupPayload(
+            LedgerBackupPayload(
+                preview = preview,
+                entries = entries,
+                relationships = relationships,
+                descriptionBlocks = descriptionBlocks,
+                checklistItems = checklistItems,
+                notes = notes,
+                activities = activities,
+                reminders = reminders,
+                recurrenceSeries = recurrenceSeries,
+            ),
         )
+    }
+
+    private fun validateBackupPayload(backup: LedgerBackupPayload): LedgerBackupPayload {
+        val entryIds = backup.entries.map(EntryEntity::id).toSet()
+        val seriesIds = backup.recurrenceSeries.map(RecurrenceSeriesEntity::id).toSet()
+        requireUniqueRecords(backup.entries, EntryEntity::id)
+        requireUniqueRecords(backup.relationships, EntryRelationshipEntity::id)
+        requireUniqueRecords(backup.descriptionBlocks, EntryDescriptionBlockEntity::id)
+        requireUniqueRecords(backup.checklistItems, EntryChecklistEntity::id)
+        requireUniqueRecords(backup.notes, EntryNoteEntity::id)
+        requireUniqueRecords(backup.activities, EntryActivityEntity::id)
+        requireUniqueRecords(backup.reminders, EntryReminderEntity::id)
+        requireUniqueRecords(backup.recurrenceSeries, RecurrenceSeriesEntity::id)
+        require(backup.entries.all { it.title.isNotBlank() }) {
+            "This backup contains an entry with no title."
+        }
+        require(backup.entries.all { it.recurrenceSeriesId == null || it.recurrenceSeriesId in seriesIds }) {
+            "This backup refers to a missing repeat rule."
+        }
+        require(backup.relationships.all { it.sourceEntryId in entryIds && it.targetEntryId in entryIds }) {
+            "This backup contains a link to a missing entry."
+        }
+        require(backup.relationships.none { it.sourceEntryId == it.targetEntryId }) {
+            "This backup contains a link from an entry to itself."
+        }
+        require(backup.descriptionBlocks.all { it.entryId in entryIds } &&
+            backup.notes.all { it.entryId in entryIds } && backup.activities.all { it.entryId in entryIds } &&
+            backup.reminders.all { it.entryId in entryIds }
+        ) { "This backup contains details for a missing entry." }
+        require(backup.checklistItems.all {
+            it.entryId in entryIds && (it.linkedEntryId == null || it.linkedEntryId in entryIds)
+        }) { "This backup contains a checklist link to a missing entry." }
+        require(backup.reminders.all {
+            it.parentReminderId == null || backup.reminders.any { parent -> parent.id == it.parentReminderId }
+        }) { "This backup contains a reminder that refers to a missing reminder." }
+        val relationshipKeys = backup.relationships.map {
+            "${it.sourceEntryId}|${it.targetEntryId}|${it.relationshipType}"
+        }
+        require(relationshipKeys.toSet().size == relationshipKeys.size) {
+            "This backup contains duplicate links."
+        }
+        return backup
     }
 
     override fun searchEntries(

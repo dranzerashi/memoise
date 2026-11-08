@@ -44,6 +44,7 @@ class EntryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
     private var pendingRestoreJson: String? = null
+    private var pendingDatabaseRestore: java.io.File? = null
     val entries: StateFlow<List<LedgerEntry>> = repository.observeEntries().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -106,6 +107,8 @@ class EntryViewModel @Inject constructor(
     fun prepareRestore(uri: Uri, onPrepared: (LedgerRestorePreview?, String?) -> Unit) {
         viewModelScope.launch {
             try {
+                pendingDatabaseRestore?.delete()
+                pendingDatabaseRestore = null
                 val json = withContext(Dispatchers.IO) {
                     val input = context.contentResolver.openInputStream(uri)
                         ?: error("Could not open the selected file")
@@ -125,18 +128,49 @@ class EntryViewModel @Inject constructor(
 
     fun discardPreparedRestore() {
         pendingRestoreJson = null
+        pendingDatabaseRestore?.delete()
+        pendingDatabaseRestore = null
+    }
+
+    fun prepareDatabaseRestore(uri: Uri, onPrepared: (LedgerRestorePreview?, String?) -> Unit) {
+        viewModelScope.launch {
+            val snapshot = java.io.File(context.cacheDir, "memoise-import-${UUID.randomUUID()}.db")
+            try {
+                pendingRestoreJson = null
+                pendingDatabaseRestore?.delete()
+                pendingDatabaseRestore = null
+                withContext(Dispatchers.IO) {
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: error("Could not open the selected file")
+                    input.use { source -> snapshot.outputStream().use { source.copyTo(it) } }
+                }
+                val preview = withContext(Dispatchers.IO) { repository.inspectDatabaseBackup(snapshot) }
+                pendingDatabaseRestore = snapshot
+                onPrepared(preview, null)
+            } catch (cancelled: CancellationException) {
+                snapshot.delete()
+                throw cancelled
+            } catch (error: Exception) {
+                snapshot.delete()
+                onPrepared(null, error.message ?: "Could not read this database backup.")
+            }
+        }
     }
 
     fun restorePrepared(onFinished: (Boolean, String?) -> Unit) {
         val json = pendingRestoreJson
-        if (json == null) {
+        val snapshot = pendingDatabaseRestore
+        if (json == null && snapshot == null) {
             onFinished(false, "Choose a backup file first.")
             return
         }
         viewModelScope.launch {
             try {
-                repository.restoreBackup(json)
+                if (json != null) repository.restoreBackup(json)
+                else repository.restoreDatabaseSnapshot(checkNotNull(snapshot))
                 pendingRestoreJson = null
+                pendingDatabaseRestore?.delete()
+                pendingDatabaseRestore = null
                 onFinished(true, null)
             } catch (cancelled: CancellationException) {
                 throw cancelled
