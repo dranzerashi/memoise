@@ -21,3 +21,7 @@ Apply the parent’s reminder timing pattern to future occurrences. Keep each oc
 ## D-005 — Recurrence source links
 
 Represent source-to-occurrence links in the existing entry relationship graph using the recurrence relationship type.
+
+## D-006 — Skipping one occurrence
+
+Use the occurrence’s existing cancelled status; keep the entry and its history, and let the rest of the series continue.

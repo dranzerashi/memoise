@@ -9,6 +9,7 @@ This document records current product behavior. User-facing explanations will be
 - Each occurrence links to its source through the same entry relationship graph used by preparations, follow-ups, and related entries. Open an occurrence and use **Source: _entry title_** under **Repeat** to navigate to the series source. The source lists its generated entries under **Occurrences**.
 - Stopping a series preserves its source and all occurrences already created. No further occurrences are generated.
 - Completing or cancelling an occurrence affects only that entry; the series continues.
+- **Skip this one** marks a future occurrence cancelled and leaves the other repeats unchanged.
 - Editing an occurrence’s title, date, status, notes, or relationships does not change other occurrences. Editing the source does not rewrite occurrences already created.
 - If the source entry is deleted, the oldest remaining occurrence becomes the source and the active series continues. If there are no remaining occurrences, the series stops.
 

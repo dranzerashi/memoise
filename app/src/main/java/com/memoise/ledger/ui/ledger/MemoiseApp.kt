@@ -1448,8 +1448,10 @@ private fun EntryDetailScreen(
                     entry = entry,
                     recurrence = recurrence,
                     sourceEntry = recurrenceSource,
+                    isRecurrenceTemplate = isRecurrenceTemplate,
                     onCreate = { frequency -> onCreateRecurrence(entry.id, frequency) },
                     onStop = { onStopRecurrence(entry.id) },
+                    onSkip = { onSetStatus(entry, EntryStatus.CANCELLED) },
                     onOpenSource = onOpenEntry,
                 )
                 if (entry.recurrenceSeriesId != null && isRecurrenceTemplate) {
@@ -2273,12 +2275,15 @@ private fun RecurrenceSection(
     entry: LedgerEntry,
     recurrence: LedgerRecurrenceSeries?,
     sourceEntry: LedgerEntry?,
+    isRecurrenceTemplate: Boolean,
     onCreate: (RecurrenceFrequency) -> Unit,
     onStop: () -> Unit,
+    onSkip: () -> Unit,
     onOpenSource: (LedgerEntry) -> Unit,
 ) {
     var expanded by remember(entry.id) { mutableStateOf(false) }
     var showStopConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
+    var showSkipConfirmation by rememberSaveable(entry.id) { mutableStateOf(false) }
     Column {
         SectionLabel("REPEAT")
         if (sourceEntry != null && sourceEntry.id != entry.id) {
@@ -2349,6 +2354,18 @@ private fun RecurrenceSection(
                 ) {
                     Text("Stop future repeats")
                 }
+                if (
+                    !isRecurrenceTemplate &&
+                    entry.status != EntryStatus.COMPLETED &&
+                    entry.status != EntryStatus.CANCELLED
+                ) {
+                    TextButton(
+                        onClick = { showSkipConfirmation = true },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("Skip this one")
+                    }
+                }
             }
         }
     }
@@ -2367,6 +2384,26 @@ private fun RecurrenceSection(
             },
             dismissButton = {
                 TextButton(onClick = { showStopConfirmation = false }) { Text("Keep repeating") }
+            },
+        )
+    }
+    if (showSkipConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showSkipConfirmation = false },
+            title = { Text("Skip this one?") },
+            text = {
+                Text("This entry will be marked cancelled. Other repeats will stay as they are.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSkipConfirmation = false
+                        onSkip()
+                    },
+                ) { Text("Skip this one") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSkipConfirmation = false }) { Text("Keep it") }
             },
         )
     }

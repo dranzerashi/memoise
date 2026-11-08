@@ -165,3 +165,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Pixel reminder worker verification
 
 - Confirmed on Pixel 7a: the background worker opened the version 11 database, returned success, and recorded the reminder as sent. Temporary test data and its notification were removed.
+
+## 2026-11-08 — Skip one recurring entry
+
+- Added **Skip this one** for active future occurrences. It marks only that entry cancelled; it and the other occurrences remain in the same series. Confirmed on Pixel 7a with a monthly series containing multiple future entries.
