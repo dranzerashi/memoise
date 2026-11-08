@@ -153,3 +153,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — OnePlus restore integrity check
 
 - Kept the integrity gate and ran SQLite's check on the private writable import copy. OnePlus SQLite 3.44.5 then returned `ok` for the backup; the original file remains unchanged.
+
+## 2026-11-08 — Quick capture widget and launcher shortcut
+
+- Added a small Memoise-styled plus widget and an app-icon shortcut; both open the existing quick-capture screen directly. The debug build is ready for Pixel verification.

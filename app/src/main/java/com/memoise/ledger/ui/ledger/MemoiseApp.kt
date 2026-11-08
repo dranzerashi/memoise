@@ -124,7 +124,11 @@ private enum class PrimaryDestination(val route: String, val label: String, val 
 }
 
 @Composable
-fun MemoiseApp(viewModel: EntryViewModel) {
+fun MemoiseApp(
+    viewModel: EntryViewModel,
+    openQuickCapture: Boolean = false,
+    onQuickCaptureOpened: () -> Unit = {},
+) {
     val entries by viewModel.entries.collectAsState()
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -180,6 +184,12 @@ fun MemoiseApp(viewModel: EntryViewModel) {
     }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    LaunchedEffect(openQuickCapture) {
+        if (openQuickCapture) {
+            navController.navigate(CAPTURE_ROUTE) { launchSingleTop = true }
+            onQuickCaptureOpened()
+        }
+    }
     val showPrimaryNavigation = currentRoute in setOf(
         TIMELINE_ROUTE,
         UNSCHEDULED_ROUTE,

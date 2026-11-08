@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="quick_capture"
+        android:shortcutLongLabel="@string/quick_capture_shortcut_long"
+        android:shortcutShortLabel="@string/quick_capture_shortcut_short">
+        <intent
+            android:action="com.memoise.ledger.action.QUICK_CAPTURE"
+            android:targetClass="com.memoise.ledger.MainActivity"
+            android:targetPackage="com.memoise.ledger" />
+    </shortcut>
+</shortcuts>
