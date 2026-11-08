@@ -37,3 +37,7 @@ This document records current product behavior. User-facing explanations will be
 ## Appearance
 
 - Choose **System default**, **Light**, or **Dark** in Settings. The choice is saved on this device and applied across the app. System default follows Android’s current appearance setting.
+
+## Help
+
+- Settings includes a short Help screen explaining date meanings, repeat setup and removal, reminder inheritance, and backups in plain language.

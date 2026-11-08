@@ -218,3 +218,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 
 - Added **System default**, **Light**, and **Dark** choices in Settings, persisted with Preferences DataStore and applied across the app. Android’s high-contrast text preference continues to adjust the light palette.
 - `./gradlew assembleDebug` completed successfully. The combined recurrence and appearance build is ready for device verification.
+
+## 2026-11-08 — In-app Help
+
+- Added a Help screen under Settings with plain-language explanations of dates, repeats, reminder inheritance, and backups.

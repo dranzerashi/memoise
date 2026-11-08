@@ -126,6 +126,7 @@ private const val UNSCHEDULED_ROUTE = "unscheduled"
 private const val OVERDUE_ROUTE = "overdue"
 private const val SEARCH_ROUTE = "search"
 private const val SETTINGS_ROUTE = "settings"
+private const val HELP_ROUTE = "help"
 private const val ENTRY_ROUTE = "entry/{entryId}"
 private const val CAPTURE_ROUTE = "capture"
 private const val RELATED_CAPTURE_ROUTE =
@@ -307,6 +308,7 @@ fun MemoiseApp(
             composable(SETTINGS_ROUTE) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
+                    onOpenHelp = { navController.navigate(HELP_ROUTE) },
                     themePreference = viewModel.themePreference.collectAsState().value,
                     onThemePreferenceSelected = viewModel::setThemePreference,
                     onExportJson = {
@@ -340,6 +342,9 @@ fun MemoiseApp(
                         }
                     },
                 )
+            }
+            composable(HELP_ROUTE) {
+                HelpScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = ENTRY_ROUTE,
@@ -969,6 +974,7 @@ private fun SearchDateField(
 @Composable
 private fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenHelp: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceSelected: (ThemePreference) -> Unit,
     onExportJson: () -> Unit,
@@ -1013,6 +1019,12 @@ private fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
+        }
+        TextButton(
+            onClick = onOpenHelp,
+            modifier = Modifier.padding(start = 26.dp, top = 4.dp),
+        ) {
+            Text("Help with dates, repeats, and reminders")
         }
         Box(Modifier.padding(start = 26.dp, top = 12.dp)) {
             SectionLabel("BACKUP AND RESTORE")
@@ -1068,6 +1080,63 @@ private fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = onDismissRestore, enabled = !restoring) { Text("Cancel") }
             },
+        )
+    }
+}
+
+@Composable
+private fun HelpScreen(onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        LedgerHeader(
+            title = "Help",
+            subtitle = "A few notes on how your ledger works.",
+            trailing = { TextButton(onClick = onBack) { Text("Back") } },
+        )
+        HelpTopic(
+            title = "Dates",
+            body = "Event keeps a date for something that happened or will happen. Due by marks an obligation that can become overdue. Maybe on is a flexible date you have in mind. Entries without a date stay in Unscheduled.",
+        )
+        HelpTopic(
+            title = "Repeating entries",
+            body = "Choose how often an entry repeats and, if you like, when it should end before you start. Memoise adds future repeats gradually. Each repeat can be changed on its own. Completing, cancelling, or skipping one does not stop the others.",
+        )
+        HelpTopic(
+            title = "Changing or ending repeats",
+            body = "Changing the end date or stopping repeats affects future additions. Repeats already in your ledger stay. If you remove the first entry on its own, the other repeats stay and continue from the earliest one left.",
+        )
+        HelpTopic(
+            title = "Reminders on repeats",
+            body = "Reminders on the first entry carry forward to future repeats. Changing or removing a reminder there updates its inherited copies. If you change a reminder on one repeat, that reminder becomes its own and can be managed separately.",
+        )
+        HelpTopic(
+            title = "Removing all repeats",
+            body = "When removing the first entry, choose Remove all repeats to remove the whole set and the saved details on those entries. Choose Remove this entry only to keep the rest.",
+        )
+        HelpTopic(
+            title = "Backups",
+            body = "Your ledger is stored on this device. Create a backup before moving it elsewhere. Restoring a backup replaces the ledger currently on this device.",
+        )
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun HelpTopic(title: String, body: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 26.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            text = body,
+            modifier = Modifier.padding(top = 5.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
