@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,8 +64,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -239,6 +250,7 @@ fun MemoiseApp(
         floatingActionButton = {
             if (showPrimaryNavigation) {
                 FloatingActionButton(
+                    modifier = Modifier.semantics { contentDescription = "Add entry" },
                     onClick = { navController.navigate(CAPTURE_ROUTE) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -719,69 +731,69 @@ private fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             singleLine = true,
             placeholder = { Text("Search everything…") },
-            leadingIcon = { Text("⌕", fontSize = 22.sp) },
+            leadingIcon = {
+                Text("⌕", modifier = Modifier.clearAndSetSemantics {}, fontSize = 22.sp)
+            },
         )
         Spacer(Modifier.height(12.dp))
-        Row(
+        AdaptiveFilterPair(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
+            first = {
                 SectionLabel("STATUS")
                 EntryDropdown(
                     modifier = Modifier.fillMaxWidth(),
                     selected = statusLabel,
+                    accessibilityLabel = "Status filter",
                     options = statusOptions,
                     onSelected = { statusLabel = it },
                 )
-            }
-            Column(Modifier.weight(1f)) {
+            },
+            second = {
                 SectionLabel("ENTRY TYPE")
                 EntryDropdown(
                     modifier = Modifier.fillMaxWidth(),
                     selected = typeLabel,
+                    accessibilityLabel = "Entry type filter",
                     options = typeOptions,
                     onSelected = { typeLabel = it },
                 )
-            }
-        }
-        Row(
+            },
+        )
+        AdaptiveFilterPair(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
+            first = {
                 SectionLabel("DATE")
                 EntryDropdown(
                     modifier = Modifier.fillMaxWidth(),
                     selected = dateLabel,
+                    accessibilityLabel = "Date filter",
                     options = dateOptions,
                     onSelected = { dateLabel = it },
                 )
-            }
-            Column(Modifier.weight(1f)) {
+            },
+            second = {
                 SectionLabel("LINKS")
                 EntryDropdown(
                     modifier = Modifier.fillMaxWidth(),
                     selected = relationshipLabel,
+                    accessibilityLabel = "Linked-entry filter",
                     options = relationshipOptions,
                     onSelected = { relationshipLabel = it },
                 )
-            }
-        }
+            },
+        )
         if (selectedDateFilter == SearchDateFilter.RANGE) {
-            Row(
+            AdaptiveFilterPair(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Column(Modifier.weight(1f)) {
+                first = {
                     SectionLabel("FROM")
                     SearchDateField("Choose date", fromDate) { fromDateText = it?.toString() }
-                }
-                Column(Modifier.weight(1f)) {
+                },
+                second = {
                     SectionLabel("THROUGH")
                     SearchDateField("Choose date", toDate) { toDateText = it?.toString() }
-                }
-            }
+                },
+            )
         }
 
         when {
@@ -825,6 +837,29 @@ private fun SearchScreen(
 }
 
 @Composable
+private fun AdaptiveFilterPair(
+    modifier: Modifier = Modifier,
+    first: @Composable () -> Unit,
+    second: @Composable () -> Unit,
+    stack: Boolean? = null,
+) {
+    val shouldStack = stack ?: (
+        LocalDensity.current.fontScale >= 1.3f || LocalConfiguration.current.screenWidthDp < 360
+        )
+    if (shouldStack) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            first()
+            second()
+        }
+    } else {
+        Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f)) { first() }
+            Column(Modifier.weight(1f)) { second() }
+        }
+    }
+}
+
+@Composable
 private fun SearchResultRow(
     entry: LedgerEntry,
     excerpt: String,
@@ -833,6 +868,7 @@ private fun SearchResultRow(
     Column(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 26.dp, vertical = 11.dp),
     ) {
@@ -887,12 +923,13 @@ private fun SearchDateField(
         ) {
             Text(
                 date?.format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())) ?: label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
         if (date != null) {
             TextButton(
+                modifier = Modifier.semantics {
+                    contentDescription = if (label == "Choose date") "Clear selected date" else "Clear $label"
+                },
                 contentPadding = PaddingValues(horizontal = 4.dp),
                 onClick = { onDateSelected(null) },
             ) { Text("×") }
@@ -1005,6 +1042,7 @@ private fun LedgerHeader(
             Column(Modifier.weight(1f)) {
                 Text(
                     text = title,
+                    modifier = Modifier.semantics { heading() },
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
@@ -1035,8 +1073,6 @@ private fun LedgerHeader(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 letterSpacing = 0.75.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -1095,6 +1131,7 @@ private fun LedgerEntryRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(start = 27.dp, end = 22.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.Top,
@@ -1113,7 +1150,24 @@ private fun LedgerEntryRow(
                     ),
             )
             if (completed) {
-                Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 7.sp, lineHeight = 9.sp)
+                val checkColor = MaterialTheme.colorScheme.onPrimary
+                Canvas(Modifier.size(9.dp)) {
+                    val strokeWidth = size.minDimension * 0.14f
+                    drawLine(
+                        color = checkColor,
+                        start = Offset(size.width * 0.18f, size.height * 0.52f),
+                        end = Offset(size.width * 0.42f, size.height * 0.76f),
+                        strokeWidth = strokeWidth,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = checkColor,
+                        start = Offset(size.width * 0.42f, size.height * 0.76f),
+                        end = Offset(size.width * 0.84f, size.height * 0.24f),
+                        strokeWidth = strokeWidth,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    )
+                }
             } else {
                 Box(
                     Modifier
@@ -1156,7 +1210,7 @@ private fun LedgerEntryRow(
             text = "›",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(start = 10.dp),
+            modifier = Modifier.padding(start = 10.dp).clearAndSetSemantics {},
         )
     }
 }
@@ -1275,7 +1329,7 @@ private fun CaptureScreen(
                         Text(
                             "Add a title",
                             style = TextStyle(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = FontFamily.Serif,
                                 fontSize = 22.sp,
                             ),
@@ -1413,42 +1467,42 @@ private fun EntryDetailScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 if (entry.scheduledDate != null) {
-                    Row(
+                    AdaptiveFilterPair(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(Modifier.weight(1f)) {
+                        first = {
                             SectionLabel("STATUS")
                             Spacer(Modifier.height(6.dp))
                             EntryDropdown(
                                 modifier = Modifier.fillMaxWidth(),
                                 selected = entry.status.displayName(),
+                                accessibilityLabel = "Status",
                                 options = EntryStatus.entries.associateBy { it.displayName() },
                                 onSelected = { label ->
                                     EntryStatus.entries.firstOrNull { it.displayName() == label }
                                         ?.let { onSetStatus(entry, it) }
                                 },
                             )
-                        }
-                        Column(Modifier.weight(1f)) {
+                        },
+                        second = {
                             SectionLabel("WHAT THIS DATE MEANS")
                             Spacer(Modifier.height(6.dp))
                             EntryDropdown(
                                 modifier = Modifier.fillMaxWidth(),
                                 selected = entry.datePurpose.displayName(),
+                                accessibilityLabel = "What this date means",
                                 options = DatePurpose.entries.associateBy { it.displayName() },
                                 onSelected = { label ->
                                     DatePurpose.entries.firstOrNull { it.displayName() == label }
                                         ?.let { onSetDatePurpose(entry, it) }
                                 },
                             )
-                        }
-                    }
+                        },
+                    )
                 } else {
                     SectionLabel("STATUS")
                     EntryDropdown(
                         selected = entry.status.displayName(),
+                        accessibilityLabel = "Status",
                         options = EntryStatus.entries.associateBy { it.displayName() },
                         onSelected = { label ->
                             EntryStatus.entries.firstOrNull { it.displayName() == label }
@@ -1725,10 +1779,38 @@ private fun DescriptionBlockRow(
                 text = block.content,
                 modifier = Modifier
                     .weight(1f)
+                    .heightIn(min = 48.dp)
                     .combinedClickable(
                         onClick = {},
                         onLongClick = { linkMenuExpanded = true },
-                    ),
+                    )
+                    .semantics {
+                        customActions = buildList {
+                            if (linkedEntry == null) {
+                                add(CustomAccessibilityAction("Create preparation") {
+                                    onConvert(RelationshipType.PREPARATION, block)
+                                    true
+                                })
+                                add(CustomAccessibilityAction("Create follow-up") {
+                                    onConvert(RelationshipType.FOLLOW_UP, block)
+                                    true
+                                })
+                            } else {
+                                add(CustomAccessibilityAction("Open linked entry") {
+                                    onOpenEntry(linkedEntry)
+                                    true
+                                })
+                            }
+                            add(CustomAccessibilityAction("Edit paragraph") {
+                                editing = true
+                                true
+                            })
+                            add(CustomAccessibilityAction("Remove paragraph") {
+                                confirmDelete = true
+                                true
+                            })
+                        }
+                    },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -1932,35 +2014,80 @@ private fun ChecklistRow(
     var editTitle by rememberSaveable(item.id) { mutableStateOf(item.title) }
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(
+                modifier = Modifier.semantics {
+                    contentDescription = if (selectionMode) "Select ${item.title}" else item.title
+                },
                 checked = if (selectionMode) selected else item.completed,
                 enabled = !selectionMode || item.linkedEntryId == null,
                 onCheckedChange = {
                     if (selectionMode) onToggleSelection() else onUpdate(item.copy(completed = it))
                 },
             )
-            Text(
-                text = item.title,
+            Box(
                 modifier = Modifier
                     .weight(1f)
+                    .heightIn(min = 48.dp)
                     .combinedClickable(
                         onClick = { if (selectionMode) onToggleSelection() },
                         onLongClick = {
                             if (selectionMode) onToggleSelection() else menuExpanded = true
                         },
+                    )
+                    .semantics {
+                        if (!selectionMode) {
+                            customActions = buildList {
+                                if (linkedEntry == null) {
+                                    add(CustomAccessibilityAction("Create preparation") {
+                                        onConvert(RelationshipType.PREPARATION, item)
+                                        true
+                                    })
+                                    add(CustomAccessibilityAction("Create follow-up") {
+                                        onConvert(RelationshipType.FOLLOW_UP, item)
+                                        true
+                                    })
+                                    add(CustomAccessibilityAction("Select multiple checklist items") {
+                                        onStartSelection()
+                                        true
+                                    })
+                                } else {
+                                    add(CustomAccessibilityAction("Open linked entry") {
+                                        onOpenEntry(linkedEntry)
+                                        true
+                                    })
+                                }
+                                add(CustomAccessibilityAction("Edit checklist item") {
+                                    editTitle = item.title
+                                    editDialogVisible = true
+                                    true
+                                })
+                                add(CustomAccessibilityAction("Delete checklist item") {
+                                    onDelete(item)
+                                    true
+                                })
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None,
                     ),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None,
-                ),
-                color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
-            )
+                    color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+            }
             if (!selectionMode) {
                 Box {
-                    TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+                    TextButton(
+                        modifier = Modifier.semantics { contentDescription = "More checklist actions" },
+                        onClick = { menuExpanded = true },
+                    ) { Text("•••") }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         if (linkedEntry == null) {
                             DropdownMenuItem(
@@ -2122,7 +2249,10 @@ private fun NoteRow(
             )
         }
         Box {
-            TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+            TextButton(
+                modifier = Modifier.semantics { contentDescription = "More note actions" },
+                onClick = { menuExpanded = true },
+            ) { Text("•••") }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
                     text = { Text("Edit note") },
@@ -2462,7 +2592,10 @@ private fun ReminderRow(
             )
         }
         Box {
-            TextButton(onClick = { menuExpanded = true }) { Text("•••") }
+            TextButton(
+                modifier = Modifier.semantics { contentDescription = "More reminder actions" },
+                onClick = { menuExpanded = true },
+            ) { Text("•••") }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 if (canManage) {
                     DropdownMenuItem(
@@ -2554,7 +2687,11 @@ private fun ReminderEditorDialog(
                                 } ?: "Custom date and time",
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("⌄", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "⌄",
+                                modifier = Modifier.clearAndSetSemantics {},
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                     DropdownMenu(
@@ -2758,6 +2895,7 @@ private fun RelationshipRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2790,7 +2928,12 @@ private fun RelationshipRow(
                 )
             }
         }
-        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 23.sp)
+        Text(
+            "›",
+            modifier = Modifier.clearAndSetSemantics {},
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 23.sp,
+        )
     }
 }
 
@@ -2804,8 +2947,21 @@ private fun DatePickerControl(
 ) {
     var showPicker by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { showPicker = true }) {
-            Text(date?.let(::formatDate) ?: "◷  $label")
+        TextButton(
+            modifier = Modifier.semantics {
+                contentDescription = date?.let { "Change date, ${formatDate(it)}" } ?: label
+            },
+            onClick = { showPicker = true },
+        ) {
+            if (date != null) {
+                Text(formatDate(date))
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("◷", modifier = Modifier.clearAndSetSemantics {})
+                    Spacer(Modifier.width(8.dp))
+                    Text(label)
+                }
+            }
         }
         if (canRemoveDate && date != null) {
             TextButton(onClick = { onDateSelected(null) }) { Text("Remove date") }
@@ -2840,16 +2996,23 @@ private fun DatePickerControl(
 private fun EntryDropdown(
     modifier: Modifier = Modifier,
     selected: String,
+    accessibilityLabel: String? = null,
     options: Map<String, *>,
     onSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
         OutlinedButton(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (accessibilityLabel == null) Modifier else Modifier.semantics {
+                        contentDescription = "$accessibilityLabel: $selected"
+                    },
+                ),
             onClick = { expanded = true },
         ) {
-            Text(selected, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(selected)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.keys.forEach { option ->
@@ -2869,6 +3032,7 @@ private fun EntryDropdown(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
+        modifier = Modifier.semantics { heading() },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         letterSpacing = 1.2.sp,

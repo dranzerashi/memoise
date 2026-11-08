@@ -6,6 +6,8 @@ val Paper = Color(0xFFF6F3EC)
 val Ink = Color(0xFF292720)
 val Olive = Color(0xFF777B50)
 val Terracotta = Color(0xFFB96F55)
+val HighContrastOlive = Color(0xFF6D714A)
+val HighContrastTerracotta = Color(0xFF9B5D47)
 val MutedInk = Color(0xFF716F66)
 val Rule = Color(0xFFD8D4C9)
 

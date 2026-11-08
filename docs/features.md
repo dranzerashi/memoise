@@ -23,3 +23,11 @@ This document records current product behavior. User-facing explanations will be
 - Changing, disabling, or removing a source reminder updates, disables, or removes its inherited copies on occurrences. Editing or toggling an occurrence’s reminder detaches it so it can be managed independently.
 - Stopping a series leaves reminders on existing occurrences in place.
 - Notification delivery is approximate and requires Android notification permission.
+
+## Accessibility
+
+- Symbol-only controls have spoken labels, and screen readers can invoke the existing description and checklist actions without relying on a long press.
+- Section titles are exposed as headings. Checklist controls announce the item they change, and date, status, and search filters announce their purpose and current value.
+- Custom clickable rows have at least a 48 dp touch area. Status is also described with text or a completion mark, not colour alone.
+- Text uses scalable units. Search filters and the entry status/date-meaning pair stack at large system text sizes or on narrow screens.
+- Android’s high-contrast-text setting selects a stronger light palette; the normal almanac palette remains in use otherwise. Dark-theme text colors already have strong contrast.

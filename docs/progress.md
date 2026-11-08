@@ -182,3 +182,25 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Open entries from reminders
 
 - Reminder notifications now open the matching ledger entry when tapped. The debug build is ready for Pixel verification.
+
+## 2026-11-08 — Screen-reader labels for symbol controls
+
+- Added spoken labels for the add-entry control, date-clearing action, and checklist, note, and reminder menus. Hid the decorative search glyph from screen readers. The debug build is ready for Pixel verification.
+
+## 2026-11-08 — Screen-reader actions for entry content
+
+- Exposed the existing description and checklist context-menu actions as TalkBack actions, including linked-entry navigation and editing. Deletion still follows the existing confirmation flow for description paragraphs.
+
+## 2026-11-08 — Accessibility pass
+
+- Added screen-reader labels and headings, direct TalkBack actions for description and checklist content, and item labels for checklist controls.
+- Set 48 dp minimums for custom clickable rows, kept status cues understandable without colour, and added a higher-contrast light palette for Android’s high-contrast-text setting.
+- Let search filters and date/status fields stack at larger text scales or narrow widths. The debug build assembles successfully.
+
+## 2026-11-08 — Keep regular palette outside accessibility setting
+
+- Restored the standard almanac colors for ordinary use. The stronger palette now follows Android’s high-contrast-text preference; TalkBack semantics remain present without changing the normal visual design.
+
+## 2026-11-08 — Checklist row alignment
+
+- Centered checklist text within its touch area so it aligns vertically with the checkbox. The debug build assembles successfully.
