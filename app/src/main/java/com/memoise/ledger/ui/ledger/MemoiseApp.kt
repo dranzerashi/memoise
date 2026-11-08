@@ -128,6 +128,8 @@ fun MemoiseApp(
     viewModel: EntryViewModel,
     openQuickCapture: Boolean = false,
     onQuickCaptureOpened: () -> Unit = {},
+    openEntryId: String? = null,
+    onEntryOpened: () -> Unit = {},
 ) {
     val entries by viewModel.entries.collectAsState()
     val navController = rememberNavController()
@@ -188,6 +190,15 @@ fun MemoiseApp(
         if (openQuickCapture) {
             navController.navigate(CAPTURE_ROUTE) { launchSingleTop = true }
             onQuickCaptureOpened()
+        }
+    }
+    LaunchedEffect(openEntryId, entries) {
+        if (openEntryId != null && entries.any { it.id == openEntryId }) {
+            navController.navigate("entry/$openEntryId") {
+                popUpTo(TIMELINE_ROUTE)
+                launchSingleTop = true
+            }
+            onEntryOpened()
         }
     }
     val showPrimaryNavigation = currentRoute in setOf(

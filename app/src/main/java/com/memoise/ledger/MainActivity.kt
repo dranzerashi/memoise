@@ -15,10 +15,13 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val entryViewModel: EntryViewModel by viewModels()
     private val openQuickCapture = mutableStateOf(false)
+    private val openEntryId = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         openQuickCapture.value = intent?.action == ACTION_QUICK_CAPTURE
+        openEntryId.value = intent?.takeIf { it.action == ACTION_OPEN_ENTRY }
+            ?.getStringExtra(EXTRA_ENTRY_ID)
         enableEdgeToEdge()
         setContent {
             MemoiseTheme {
@@ -26,6 +29,8 @@ class MainActivity : ComponentActivity() {
                     viewModel = entryViewModel,
                     openQuickCapture = openQuickCapture.value,
                     onQuickCaptureOpened = { openQuickCapture.value = false },
+                    openEntryId = openEntryId.value,
+                    onEntryOpened = { openEntryId.value = null },
                 )
             }
         }
@@ -35,9 +40,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openQuickCapture.value = intent.action == ACTION_QUICK_CAPTURE
+        openEntryId.value = intent.takeIf { it.action == ACTION_OPEN_ENTRY }
+            ?.getStringExtra(EXTRA_ENTRY_ID)
     }
 
     companion object {
         const val ACTION_QUICK_CAPTURE = "com.memoise.ledger.action.QUICK_CAPTURE"
+        const val ACTION_OPEN_ENTRY = "com.memoise.ledger.action.OPEN_ENTRY"
+        const val EXTRA_ENTRY_ID = "com.memoise.ledger.extra.ENTRY_ID"
     }
 }

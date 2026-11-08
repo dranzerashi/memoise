@@ -178,3 +178,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Pixel recurrence exception verification
 
 - Confirmed on Pixel that a moved monthly occurrence stays on its new date after reopening and is not recreated on the original date.
+
+## 2026-11-08 — Open entries from reminders
+
+- Reminder notifications now open the matching ledger entry when tapped. The debug build is ready for Pixel verification.
