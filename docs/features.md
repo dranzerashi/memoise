@@ -46,3 +46,7 @@ This document records current product behavior. User-facing explanations will be
 
 - The Search screen keeps the five most recent submitted searches on this device. Select one to search again, or clear the list.
 - Matching words are emphasized in entry titles and in the matching content excerpt.
+
+## About
+
+- Settings shows the Memoise name, short product description, app version, and a note that the ledger is stored locally unless the user exports a backup.

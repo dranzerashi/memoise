@@ -118,6 +118,7 @@ import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import com.memoise.ledger.domain.model.LedgerRestorePreview
 import com.memoise.ledger.data.preferences.ThemePreference
+import com.memoise.ledger.BuildConfig
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -1153,6 +1154,32 @@ private fun SettingsScreen(
         ) {
             Text("Create full backup")
         }
+        Box(Modifier.padding(start = 26.dp, top = 24.dp)) {
+            SectionLabel("ABOUT MEMOISE")
+        }
+        Text(
+            "Memoise · Personal Ledger",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            "Everything has a place. A personal memory, organised through time.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Version ${BuildConfig.VERSION_NAME}",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Memoise works offline and does not use an account or cloud sync. Your ledger stays on this device unless you export a backup to a location you choose.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(20.dp))
     }
     restorePreview?.let { preview ->
         AlertDialog(

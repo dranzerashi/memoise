@@ -226,3 +226,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — Search refinements
 
 - Added five recent searches with quick reuse and clear controls. Search result titles and matching content excerpts emphasize matched words.
+
+## 2026-11-09 — About Memoise
+
+- Added the app version, product description, and concise local-storage and backup information to Settings.
