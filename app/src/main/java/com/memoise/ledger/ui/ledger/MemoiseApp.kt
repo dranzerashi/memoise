@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -79,6 +81,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -301,6 +306,9 @@ fun MemoiseApp(
                 SearchScreen(
                     entries = entries,
                     search = viewModel::searchEntries,
+                    recentSearches = viewModel.recentSearches.collectAsState().value,
+                    onRememberSearch = viewModel::rememberSearch,
+                    onClearRecentSearches = viewModel::clearRecentSearches,
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
                     onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
@@ -669,9 +677,13 @@ private fun SearchScreen(
         LocalDate?,
         SearchRelationshipFilter,
     ) -> Flow<List<LedgerSearchMatch>>,
+    recentSearches: List<String>,
+    onRememberSearch: (String) -> Unit,
+    onClearRecentSearches: () -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
     var query by rememberSaveable { mutableStateOf("") }
     var statusLabel by rememberSaveable { mutableStateOf("Any status") }
     var typeLabel by rememberSaveable { mutableStateOf("Any type") }
@@ -746,11 +758,44 @@ private fun SearchScreen(
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    onRememberSearch(query)
+                    focusManager.clearFocus()
+                },
+            ),
             placeholder = { Text("Search everything…") },
             leadingIcon = {
                 Text("⌕", modifier = Modifier.clearAndSetSemantics {}, fontSize = 22.sp)
             },
         )
+        if (query.isBlank() && recentSearches.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 26.dp, end = 18.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel("RECENT SEARCHES")
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onClearRecentSearches) { Text("Clear") }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                recentSearches.forEach { recent ->
+                    AssistChip(
+                        onClick = { query = recent },
+                        label = { Text(recent, maxLines = 1) },
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         AdaptiveFilterPair(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
@@ -845,7 +890,12 @@ private fun SearchScreen(
                 }
                 items(matches, key = LedgerSearchMatch::entryId) { match ->
                     val entry = entriesById[match.entryId]
-                    if (entry != null) SearchResultRow(entry, match.excerpt) { onOpenEntry(entry) }
+                    if (entry != null) {
+                        SearchResultRow(entry, match.excerpt, query) {
+                            onRememberSearch(query)
+                            onOpenEntry(entry)
+                        }
+                    }
                 }
             }
         }
@@ -879,8 +929,10 @@ private fun AdaptiveFilterPair(
 private fun SearchResultRow(
     entry: LedgerEntry,
     excerpt: String,
+    query: String,
     onClick: () -> Unit,
 ) {
+    val highlightColor = MaterialTheme.colorScheme.primary
     Column(
         Modifier
             .fillMaxWidth()
@@ -889,7 +941,7 @@ private fun SearchResultRow(
             .padding(horizontal = 26.dp, vertical = 11.dp),
     ) {
         Text(
-            entry.title,
+            emphasizeSearchTerms(entry.title, query, highlightColor),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
         )
@@ -902,7 +954,7 @@ private fun SearchResultRow(
         }
         if (excerpt.isNotBlank() && !excerpt.equals(entry.title, ignoreCase = true)) {
             Text(
-                excerpt,
+                emphasizeFtsExcerpt(excerpt, highlightColor),
                 modifier = Modifier.padding(top = 3.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -919,6 +971,47 @@ private fun SearchResultRow(
             .background(MaterialTheme.colorScheme.outlineVariant),
     )
 }
+
+private fun emphasizeSearchTerms(text: String, query: String, color: Color): AnnotatedString =
+    buildAnnotatedString {
+        append(text)
+        val terms = query.split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter(String::isNotBlank)
+            .distinct()
+        terms.forEach { term ->
+            var start = text.indexOf(term, ignoreCase = true)
+            while (start >= 0) {
+                addStyle(
+                    SpanStyle(color = color, fontWeight = FontWeight.SemiBold),
+                    start,
+                    start + term.length,
+                )
+                start = text.indexOf(term, start + term.length, ignoreCase = true)
+            }
+        }
+    }
+
+private fun emphasizeFtsExcerpt(text: String, color: Color): AnnotatedString =
+    buildAnnotatedString {
+        var cursor = 0
+        while (cursor < text.length) {
+            val start = text.indexOf('“', cursor)
+            if (start < 0) {
+                append(text.substring(cursor))
+                break
+            }
+            append(text.substring(cursor, start))
+            val end = text.indexOf('”', start + 1)
+            if (end < 0) {
+                append(text.substring(start))
+                break
+            }
+            pushStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold))
+            append(text.substring(start + 1, end))
+            pop()
+            cursor = end + 1
+        }
+    }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)

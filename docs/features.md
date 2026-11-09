@@ -41,3 +41,8 @@ This document records current product behavior. User-facing explanations will be
 ## Help
 
 - Settings includes a short Help screen explaining date meanings, repeat setup and removal, reminder inheritance, and backups in plain language.
+
+## Search
+
+- The Search screen keeps the five most recent submitted searches on this device. Select one to search again, or clear the list.
+- Matching words are emphasized in entry titles and in the matching content excerpt.

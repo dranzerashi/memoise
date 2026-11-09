@@ -222,3 +222,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-08 — In-app Help
 
 - Added a Help screen under Settings with plain-language explanations of dates, repeats, reminder inheritance, and backups.
+
+## 2026-11-08 — Search refinements
+
+- Added five recent searches with quick reuse and clear controls. Search result titles and matching content excerpts emphasize matched words.

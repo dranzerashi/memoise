@@ -58,9 +58,22 @@ class EntryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = ThemePreference.SYSTEM,
     )
+    val recentSearches: StateFlow<List<String>> = userPreferencesRepository.recentSearches.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
 
     fun setThemePreference(preference: ThemePreference) {
         viewModelScope.launch { userPreferencesRepository.setThemePreference(preference) }
+    }
+
+    fun rememberSearch(query: String) {
+        viewModelScope.launch { userPreferencesRepository.rememberSearch(query) }
+    }
+
+    fun clearRecentSearches() {
+        viewModelScope.launch { userPreferencesRepository.clearRecentSearches() }
     }
 
     fun searchEntries(
