@@ -3,6 +3,7 @@ package com.memoise.ledger.domain.model
 import java.time.LocalDate
 import java.time.LocalTime
 
+@Deprecated("Legacy classification retained for existing database and backup compatibility; use DatePurpose for date meaning.")
 enum class EntryType {
     TASK,
     EVENT,
@@ -94,6 +95,7 @@ data class CaptureReminderDraft(
 data class LedgerEntry(
     val id: String,
     val title: String,
+    @Deprecated("Legacy classification retained for existing database and backup compatibility; do not set for new entries.")
     val type: EntryType? = null,
     val status: EntryStatus = EntryStatus.PENDING,
     val scheduledDate: LocalDate? = null,

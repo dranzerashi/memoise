@@ -46,6 +46,7 @@ This document records current product behavior. User-facing explanations will be
 
 - The Search screen keeps the five most recent submitted searches on this device. Select one to search again, or clear the list.
 - Matching words are emphasized in entry titles and in the matching content excerpt.
+- Search can filter by status, date meaning, date, and whether an entry has links.
 
 ## About
 
@@ -55,9 +56,11 @@ This document records current product behavior. User-facing explanations will be
 
 - Settings shows whether Android allows Memoise to send notifications and links to Android’s notification settings for this app.
 - Set the starting time for newly created reminders. This does not create reminders automatically and does not change existing reminders.
+- Choose the default for **What this date means** on new entries: **Event**, **Due by**, or **Maybe on**. Event is the initial default; changing it does not affect existing entries.
 
 ## Quick capture
 
 - New-entry and related-entry capture can include an optional description paragraph. The entry, relationship, and paragraph are saved together; title remains the only required field.
 - Capture can also include an optional custom or relative reminder. Its initial time comes from the reminder default in Settings; creating a reminder still requires notification permission.
 - Capture can include an optional checklist with multiple steps. The steps save together with the entry and any relationship, description, or reminder.
+- **What this date means** is shown directly during capture and in entry details, using the same choices: **Event**, **Due by**, or **Maybe on**. New entries default to Event; choose another default in Settings.

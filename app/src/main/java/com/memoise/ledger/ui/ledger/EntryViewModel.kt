@@ -20,7 +20,6 @@ import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
 import com.memoise.ledger.domain.model.RelationshipType
-import com.memoise.ledger.domain.model.EntryType
 import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
@@ -71,6 +70,11 @@ class EntryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = 9 * 60,
     )
+    val defaultDatePurpose: StateFlow<DatePurpose> = userPreferencesRepository.defaultDatePurpose.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = DatePurpose.EVENT,
+    )
 
     fun setThemePreference(preference: ThemePreference) {
         viewModelScope.launch { userPreferencesRepository.setThemePreference(preference) }
@@ -88,15 +92,19 @@ class EntryViewModel @Inject constructor(
         viewModelScope.launch { userPreferencesRepository.setDefaultReminderMinute(minute) }
     }
 
+    fun setDefaultDatePurpose(purpose: DatePurpose) {
+        viewModelScope.launch { userPreferencesRepository.setDefaultDatePurpose(purpose) }
+    }
+
     fun searchEntries(
         query: String,
         status: EntryStatus?,
-        type: EntryType?,
+        datePurpose: DatePurpose?,
         dateFilter: SearchDateFilter,
         dateFrom: LocalDate?,
         dateTo: LocalDate?,
         relationshipFilter: SearchRelationshipFilter,
-    ) = repository.searchEntries(query, status, type, dateFilter, dateFrom, dateTo, relationshipFilter)
+    ) = repository.searchEntries(query, status, datePurpose, dateFilter, dateFrom, dateTo, relationshipFilter)
 
     fun exportJson(destination: Uri, onFinished: (Boolean) -> Unit) {
         viewModelScope.launch {
@@ -223,8 +231,9 @@ class EntryViewModel @Inject constructor(
         description: String? = null,
         reminderDraft: CaptureReminderDraft? = null,
         checklistItems: List<String> = emptyList(),
+        datePurpose: DatePurpose = DatePurpose.EVENT,
     ) {
-        val entry = newEntry(title, scheduledDate) ?: return
+        val entry = newEntry(title, scheduledDate, datePurpose = datePurpose) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch { repository.create(entry, description, reminder, checklistItems) }
     }
@@ -239,6 +248,7 @@ class EntryViewModel @Inject constructor(
         description: String? = null,
         reminderDraft: CaptureReminderDraft? = null,
         checklistItems: List<String> = emptyList(),
+        datePurpose: DatePurpose = DatePurpose.EVENT,
     ) {
         val sourceId = sourceContentId ?: sourceChecklistItemIds.singleOrNull()
         val entry = newEntry(
@@ -246,6 +256,7 @@ class EntryViewModel @Inject constructor(
             scheduledDate = scheduledDate,
             sourceEntryId = if (sourceContentId != null || sourceChecklistItemIds.isNotEmpty()) parentId else null,
             sourceContentId = sourceId,
+            datePurpose = datePurpose,
         ) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch {
@@ -379,6 +390,7 @@ class EntryViewModel @Inject constructor(
         scheduledDate: LocalDate?,
         sourceEntryId: String? = null,
         sourceContentId: String? = null,
+        datePurpose: DatePurpose = DatePurpose.EVENT,
     ): LedgerEntry? {
         val cleanTitle = title.trim()
         if (cleanTitle.isBlank()) return null
@@ -386,6 +398,7 @@ class EntryViewModel @Inject constructor(
         return LedgerEntry(
             id = UUID.randomUUID().toString(),
             title = cleanTitle,
+            datePurpose = datePurpose,
             scheduledDate = scheduledDate,
             sourceEntryId = sourceEntryId,
             sourceContentId = sourceContentId,

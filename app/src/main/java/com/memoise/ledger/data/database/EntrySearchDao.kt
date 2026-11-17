@@ -18,7 +18,7 @@ interface EntrySearchDao {
             JOIN ledger_entries AS entry ON entry.id = search.entryId
             WHERE ledger_search_fts MATCH :matchQuery
               AND (:status IS NULL OR entry.status = :status)
-              AND (:type IS NULL OR entry.entryType = :type)
+              AND (:datePurpose IS NULL OR entry.datePurpose = :datePurpose)
               AND (
                     :dateFilter = 'ANY'
                     OR (:dateFilter = 'UNDATED' AND entry.scheduledDate IS NULL)
@@ -50,7 +50,7 @@ interface EntrySearchDao {
         matchQuery: String,
         rawQuery: String,
         status: String?,
-        type: String?,
+        datePurpose: String?,
         dateFilter: String,
         dateFrom: Long?,
         dateTo: Long?,

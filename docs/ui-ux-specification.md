@@ -91,7 +91,7 @@ Use semantic colours sparingly:
 - Muted neutral for pending.
 - Accent colour for selected or highlighted elements.
 
-Do not make every entry type a different colour.
+Do not add separate category colours. Keep date meaning and status visually distinct and use their labels consistently.
 
 Use Material 3 dynamic colour support if appropriate, but preserve Memoise's visual identity and readability.
 
@@ -127,7 +127,7 @@ A bottom navigation bar is acceptable, with the four destinations represented us
 
 The quick-capture action should be accessible independently of the current navigation destination.
 
-Do not introduce separate navigation destinations for tasks, events, occasions or reminders.
+Do not introduce separate navigation destinations or category controls for tasks, events, occasions or reminders.
 
 These are all entries in the same ledger.
 

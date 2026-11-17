@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.memoise.ledger.domain.model.DatePurpose
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +38,12 @@ class UserPreferencesRepository @Inject constructor(
         }
     val defaultReminderMinute: Flow<Int> = context.userPreferencesDataStore.data
         .map { preferences -> preferences[DEFAULT_REMINDER_MINUTE] ?: DEFAULT_REMINDER_TIME }
+    val defaultDatePurpose: Flow<DatePurpose> = context.userPreferencesDataStore.data
+        .map { preferences ->
+            preferences[DEFAULT_DATE_PURPOSE]
+                ?.let { stored -> runCatching { DatePurpose.valueOf(stored) }.getOrNull() }
+                ?: DatePurpose.EVENT
+        }
 
     suspend fun setThemePreference(preference: ThemePreference) {
         context.userPreferencesDataStore.edit { preferences ->
@@ -73,10 +80,17 @@ class UserPreferencesRepository @Inject constructor(
         }
     }
 
+    suspend fun setDefaultDatePurpose(purpose: DatePurpose) {
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[DEFAULT_DATE_PURPOSE] = purpose.name
+        }
+    }
+
     private companion object {
         val THEME_PREFERENCE = stringPreferencesKey("theme_preference")
         val RECENT_SEARCHES = stringPreferencesKey("recent_searches")
         val DEFAULT_REMINDER_MINUTE = intPreferencesKey("default_reminder_minute")
+        val DEFAULT_DATE_PURPOSE = stringPreferencesKey("default_date_purpose")
         const val MAX_RECENT_SEARCHES = 5
         const val DEFAULT_REMINDER_TIME = 9 * 60
         const val MINUTES_PER_DAY = 24 * 60

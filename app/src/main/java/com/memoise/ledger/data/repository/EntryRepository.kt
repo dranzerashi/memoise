@@ -74,7 +74,7 @@ interface EntryRepository {
     fun searchEntries(
         query: String,
         status: EntryStatus?,
-        type: EntryType?,
+        datePurpose: DatePurpose?,
         dateFilter: SearchDateFilter,
         dateFrom: LocalDate?,
         dateTo: LocalDate?,
@@ -663,7 +663,7 @@ class RoomEntryRepository @Inject constructor(
     override fun searchEntries(
         query: String,
         status: EntryStatus?,
-        type: EntryType?,
+        datePurpose: DatePurpose?,
         dateFilter: SearchDateFilter,
         dateFrom: LocalDate?,
         dateTo: LocalDate?,
@@ -680,7 +680,7 @@ class RoomEntryRepository @Inject constructor(
             matchQuery = matchQuery,
             rawQuery = query.trim(),
             status = status?.name,
-            type = type?.name,
+            datePurpose = datePurpose?.name,
             dateFilter = dateFilter.name,
             dateFrom = dateFrom?.toEpochDay(),
             dateTo = dateTo?.toEpochDay(),

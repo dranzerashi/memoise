@@ -110,7 +110,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.memoise.ledger.domain.model.DatePurpose
-import com.memoise.ledger.domain.model.EntryType
 import com.memoise.ledger.domain.model.EntryStatus
 import com.memoise.ledger.domain.model.LedgerEntry
 import com.memoise.ledger.domain.model.LedgerActivity
@@ -165,6 +164,7 @@ fun MemoiseApp(
 ) {
     val entries by viewModel.entries.collectAsState()
     val defaultReminderMinute by viewModel.defaultReminderMinute.collectAsState()
+    val defaultDatePurpose by viewModel.defaultDatePurpose.collectAsState()
     val navController = rememberNavController()
     val context = LocalContext.current
     var restorePreview by remember { mutableStateOf<LedgerRestorePreview?>(null) }
@@ -333,6 +333,8 @@ fun MemoiseApp(
                     onThemePreferenceSelected = viewModel::setThemePreference,
                     defaultReminderMinute = defaultReminderMinute,
                     onDefaultReminderMinuteSelected = viewModel::setDefaultReminderMinute,
+                    defaultDatePurpose = defaultDatePurpose,
+                    onDefaultDatePurposeSelected = viewModel::setDefaultDatePurpose,
                     onExportJson = {
                         exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
                     },
@@ -459,9 +461,10 @@ fun MemoiseApp(
                 CaptureScreen(
                     heading = "New entry",
                     defaultReminderMinute = defaultReminderMinute,
+                    defaultDatePurpose = defaultDatePurpose,
                     onCancel = { navController.popBackStack() },
-                    onSave = { title, date, description, reminder, checklistItems ->
-                        viewModel.create(title, date, description, reminder, checklistItems)
+                    onSave = { title, date, description, reminder, checklistItems, datePurpose ->
+                        viewModel.create(title, date, description, reminder, checklistItems, datePurpose)
                         navController.popBackStack()
                     },
                 )
@@ -508,8 +511,9 @@ fun MemoiseApp(
                         contextLabel = "For ${parent.title}",
                         initialTitle = sourceBlock?.content ?: sourceChecklistItems.joinToString(", ") { it.title },
                         defaultReminderMinute = defaultReminderMinute,
+                        defaultDatePurpose = defaultDatePurpose,
                         onCancel = { navController.popBackStack() },
-                        onSave = { title, date, description, reminder, checklistItems ->
+                        onSave = { title, date, description, reminder, checklistItems, datePurpose ->
                             viewModel.createRelated(
                                 parent.id,
                                 type,
@@ -520,6 +524,7 @@ fun MemoiseApp(
                                 description,
                                 reminder,
                                 checklistItems,
+                                datePurpose,
                             )
                             navController.popBackStack()
                         },
@@ -691,7 +696,7 @@ private fun SearchScreen(
     search: (
         String,
         EntryStatus?,
-        EntryType?,
+        DatePurpose?,
         SearchDateFilter,
         LocalDate?,
         LocalDate?,
@@ -706,7 +711,7 @@ private fun SearchScreen(
     val focusManager = LocalFocusManager.current
     var query by rememberSaveable { mutableStateOf("") }
     var statusLabel by rememberSaveable { mutableStateOf("Any status") }
-    var typeLabel by rememberSaveable { mutableStateOf("Any type") }
+    var datePurposeLabel by rememberSaveable { mutableStateOf("Any meaning") }
     var dateLabel by rememberSaveable { mutableStateOf("Any date") }
     var relationshipLabel by rememberSaveable { mutableStateOf("Any links") }
     var fromDateText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -719,9 +724,9 @@ private fun SearchScreen(
             EntryStatus.entries.forEach { put(it.displayName(), it) }
         }
     }
-    val typeOptions = remember {
-        linkedMapOf<String, EntryType?>("Any type" to null).apply {
-            EntryType.entries.forEach { put(it.displayName(), it) }
+    val datePurposeOptions = remember {
+        linkedMapOf<String, DatePurpose?>("Any meaning" to null).apply {
+            DatePurpose.entries.forEach { put(it.displayName(), it) }
         }
     }
     val dateOptions = remember {
@@ -741,13 +746,13 @@ private fun SearchScreen(
         )
     }
     val selectedStatus = statusOptions[statusLabel]
-    val selectedType = typeOptions[typeLabel]
+    val selectedDatePurpose = datePurposeOptions[datePurposeLabel]
     val selectedDateFilter = dateOptions[dateLabel] ?: SearchDateFilter.ANY
     val selectedRelationshipFilter = relationshipOptions[relationshipLabel] ?: SearchRelationshipFilter.ANY
     val resultsFlow = remember(
         query,
         selectedStatus,
-        selectedType,
+        selectedDatePurpose,
         selectedDateFilter,
         fromDate,
         toDate,
@@ -757,7 +762,7 @@ private fun SearchScreen(
         else search(
             query,
             selectedStatus,
-            selectedType,
+            selectedDatePurpose,
             selectedDateFilter,
             fromDate,
             toDate,
@@ -830,13 +835,13 @@ private fun SearchScreen(
                 )
             },
             second = {
-                SectionLabel("ENTRY TYPE")
+                SectionLabel("WHAT THIS DATE MEANS")
                 EntryDropdown(
                     modifier = Modifier.fillMaxWidth(),
-                    selected = typeLabel,
-                    accessibilityLabel = "Entry type filter",
-                    options = typeOptions,
-                    onSelected = { typeLabel = it },
+                    selected = datePurposeLabel,
+                    accessibilityLabel = "What this date means filter",
+                    options = datePurposeOptions,
+                    onSelected = { datePurposeLabel = it },
                 )
             },
         )
@@ -1092,6 +1097,8 @@ private fun SettingsScreen(
     onThemePreferenceSelected: (ThemePreference) -> Unit,
     defaultReminderMinute: Int,
     onDefaultReminderMinuteSelected: (Int) -> Unit,
+    defaultDatePurpose: DatePurpose,
+    onDefaultDatePurposeSelected: (DatePurpose) -> Unit,
     onExportJson: () -> Unit,
     onCreateDatabaseBackup: () -> Unit,
     onChooseRestoreFile: () -> Unit,
@@ -1109,6 +1116,7 @@ private fun SettingsScreen(
     var notificationsAllowed by remember(notificationManager) {
         mutableStateOf(notificationManager.areNotificationsEnabled())
     }
+    val datePurposeOptions = remember { DatePurpose.entries.associateBy { it.displayName() } }
     DisposableEffect(lifecycleOwner, notificationManager) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -1158,6 +1166,21 @@ private fun SettingsScreen(
         ) {
             Text("Help with dates, repeats, and reminders")
         }
+        Box(Modifier.padding(start = 26.dp, top = 20.dp)) {
+            SectionLabel("NEW ENTRY DEFAULTS")
+        }
+        Text(
+            "Choose what the date means when you start a new entry.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        EntryDropdown(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 4.dp),
+            selected = defaultDatePurpose.displayName(),
+            accessibilityLabel = "Default date meaning for new entries",
+            options = datePurposeOptions,
+            onSelected = { label -> datePurposeOptions[label]?.let(onDefaultDatePurposeSelected) },
+        )
         Box(Modifier.padding(start = 26.dp, top = 20.dp)) {
             SectionLabel("NOTIFICATIONS")
         }
@@ -1587,8 +1610,9 @@ private fun CaptureScreen(
     contextLabel: String? = null,
     initialTitle: String = "",
     defaultReminderMinute: Int,
+    defaultDatePurpose: DatePurpose,
     onCancel: () -> Unit,
-    onSave: (String, LocalDate?, String?, CaptureReminderDraft?, List<String>) -> Unit,
+    onSave: (String, LocalDate?, String?, CaptureReminderDraft?, List<String>, DatePurpose) -> Unit,
 ) {
     var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
@@ -1597,10 +1621,16 @@ private fun CaptureScreen(
     var checklistItems by remember(heading, initialTitle) { mutableStateOf(emptyList<String>()) }
     var checklistStepDraft by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
     var showChecklist by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    var datePurposeLabel by rememberSaveable(heading, initialTitle, defaultDatePurpose) {
+        mutableStateOf(defaultDatePurpose.displayName())
+    }
     var reminderDraft by rememberSaveable(heading, initialTitle) { mutableStateOf<CaptureReminderDraft?>(null) }
     var showReminderEditor by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var permissionDenied by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val descriptionFocusRequester = remember { FocusRequester() }
+    val checklistFocusRequester = remember { FocusRequester() }
+    var checklistFocusRequest by remember { mutableStateOf(0) }
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -1619,6 +1649,7 @@ private fun CaptureScreen(
             ?.toEpochMilli()
     }
     val reminderIsValid = reminderTriggerAt == null || reminderTriggerAt > System.currentTimeMillis()
+    val datePurposeOptions = remember { DatePurpose.entries.associateBy { it.displayName() } }
     val openReminderEditor = {
         val hasPermission = Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -1638,10 +1669,17 @@ private fun CaptureScreen(
                 description.takeIf(String::isNotBlank),
                 reminderDraft,
                 checklistItems + listOfNotNull(pendingStep),
+                datePurposeOptions[datePurposeLabel] ?: DatePurpose.EVENT,
             )
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(showDescription) {
+        if (showDescription) descriptionFocusRequester.requestFocus()
+    }
+    LaunchedEffect(showChecklist, checklistFocusRequest) {
+        if (showChecklist) checklistFocusRequester.requestFocus()
+    }
 
     Column(
         modifier = Modifier
@@ -1727,6 +1765,7 @@ private fun CaptureScreen(
                 onValueChange = { description = it },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(descriptionFocusRequester)
                     .padding(top = 12.dp),
                 label = { Text("Add a paragraph") },
                 minLines = 2,
@@ -1770,7 +1809,10 @@ private fun CaptureScreen(
             OutlinedTextField(
                 value = checklistStepDraft,
                 onValueChange = { checklistStepDraft = it },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(checklistFocusRequester)
+                    .padding(top = 6.dp),
                 label = { Text("Add a step") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -1779,6 +1821,7 @@ private fun CaptureScreen(
                     if (step.isNotEmpty()) {
                         checklistItems = checklistItems + step
                         checklistStepDraft = ""
+                        checklistFocusRequest += 1
                     }
                 }),
             )
@@ -1788,12 +1831,20 @@ private fun CaptureScreen(
                     if (step.isNotEmpty()) {
                         checklistItems = checklistItems + step
                         checklistStepDraft = ""
+                        checklistFocusRequest += 1
                     }
                 },
                 enabled = checklistStepDraft.isNotBlank(),
                 modifier = Modifier.align(Alignment.End),
             ) { Text("Add step") }
         }
+        SectionLabel("WHAT THIS DATE MEANS")
+        EntryDropdown(
+            selected = datePurposeLabel,
+            accessibilityLabel = "What this date means",
+            options = datePurposeOptions,
+            onSelected = { datePurposeLabel = it },
+        )
         if (reminderDraft == null) {
             TextButton(
                 onClick = openReminderEditor,
@@ -2021,6 +2072,17 @@ private fun EntryDetailScreen(
                                 ?.let { onSetStatus(entry, it) }
                         },
                     )
+                    Spacer(Modifier.height(12.dp))
+                    SectionLabel("WHAT THIS DATE MEANS")
+                    EntryDropdown(
+                        selected = entry.datePurpose.displayName(),
+                        accessibilityLabel = "What this date means",
+                        options = DatePurpose.entries.associateBy { it.displayName() },
+                        onSelected = { label ->
+                            DatePurpose.entries.firstOrNull { it.displayName() == label }
+                                ?.let { onSetDatePurpose(entry, it) }
+                        },
+                    )
                 }
                 Spacer(Modifier.height(18.dp))
                 RecurrenceSection(
@@ -2217,6 +2279,7 @@ private fun DescriptionSection(
     onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var draft by rememberSaveable(entryId) { mutableStateOf("") }
+    val focusRequester = remember(entryId) { FocusRequester() }
     Column {
         SectionLabel("DESCRIPTION")
         if (blocks.isEmpty()) {
@@ -2245,6 +2308,7 @@ private fun DescriptionSection(
             onValueChange = { draft = it },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .padding(top = 8.dp),
             label = { Text("Add a paragraph") },
             minLines = 2,
@@ -2253,6 +2317,7 @@ private fun DescriptionSection(
             onClick = {
                 onAdd(entryId, draft)
                 draft = ""
+                focusRequester.requestFocus()
             },
             enabled = draft.isNotBlank(),
             modifier = Modifier.align(Alignment.End),
@@ -2438,6 +2503,7 @@ private fun ChecklistSection(
     onOpenEntry: (LedgerEntry) -> Unit,
 ) {
     var draft by rememberSaveable(entryId) { mutableStateOf("") }
+    val focusRequester = remember(entryId) { FocusRequester() }
     var selectionMode by rememberSaveable(entryId) { mutableStateOf(false) }
     var selectedItemIds by remember(entryId) { mutableStateOf(emptySet<String>()) }
     val selectedItems = items.filter { it.id in selectedItemIds && it.linkedEntryId == null }
@@ -2518,7 +2584,7 @@ private fun ChecklistSection(
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).focusRequester(focusRequester),
                     singleLine = true,
                     placeholder = { Text("Add a step") },
                 )
@@ -2526,6 +2592,7 @@ private fun ChecklistSection(
                     onClick = {
                         onAdd(entryId, draft)
                         draft = ""
+                        focusRequester.requestFocus()
                     },
                     enabled = draft.isNotBlank(),
                     modifier = Modifier.padding(start = 5.dp),
@@ -3790,13 +3857,6 @@ private fun DatePurpose.displayName(): String = when (this) {
     DatePurpose.EVENT -> "Event"
     DatePurpose.DEADLINE -> "Due by"
     DatePurpose.FLEXIBLE_TASK -> "Maybe on"
-}
-
-private fun EntryType.displayName(): String = when (this) {
-    EntryType.TASK -> "Task"
-    EntryType.EVENT -> "Event"
-    EntryType.OCCASION -> "Occasion"
-    EntryType.NOTE -> "Note"
 }
 
 private fun RelationshipType.creationLabel(): String = when (this) {

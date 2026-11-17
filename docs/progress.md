@@ -246,3 +246,23 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-17 — Checklist during capture
 
 - Added optional checklist steps during quick and related-entry capture. The entry, checklist, description, reminder, and relationship are saved in the same transaction.
+
+## 2026-11-17 — Optional entry kind
+
+- Added optional Task, Event, Occasion, and Note choices during capture and entry editing. Existing Search kind filters now have assignable values.
+
+## 2026-11-17 — Entry kind default and input focus
+
+- Made the kind selector visible throughout capture, with Event as the configurable initial default in Settings.
+- Moved focus to newly shown description and checklist inputs, and restored focus to these fields after adding a paragraph or step.
+
+
+## 2026-11-17 — Date meaning selector alignment
+
+- Replaced the separate entry-kind selector with the same **What this date means** choices used in entry details: Event, Due by, and Maybe on. Event is the configurable default. Search uses this same meaning filter.
+- Kept the capture and detail input-focus improvements.
+
+
+## 2026-11-17 — Deprecated duplicate entry type
+
+- Removed Task/Event/Occasion/Note type from active requirements and app behavior. **What this date means** is the only classification used by capture, details, and Search. The legacy database/backup field is retained only for compatibility.

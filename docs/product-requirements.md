@@ -101,7 +101,7 @@ A dedicated view containing entries that do not have an assigned scheduled date.
 
 Requirements:
 
-- Include all entry types.
+- Include all entries regardless of date meaning or status.
 - Allow entries to be edited and assigned dates.
 - Allow entries to be connected to existing entries.
 - Allow entries to be searched and filtered.
@@ -140,7 +140,7 @@ Results must show the title, scheduled date (if any), status and relevant matchi
 
 Tapping a result should open its entry detail screen.
 
-Provide optional filters for status, entry type, date range and relationship context.
+Provide optional filters for status, **What this date means**, date range and relationship context.
 
 ---
 
@@ -150,14 +150,7 @@ Everything in the application should be represented by a unified Entry model.
 
 Do not create separate task, event, reminder and occasion database subsystems.
 
-An entry can optionally have a type:
-
-- Task
-- Event
-- Occasion
-- Note
-
-The type is descriptive and should not force the user through different creation workflows.
+An entry has one date meaning, selected from **Event**, **Due by**, or **Maybe on**. This describes the role of its date. Do not add a separate Task/Event/Occasion/Note classification; those labels overlap with date meaning and entry content and create a second, confusing category.
 
 ### Entry properties
 
@@ -168,12 +161,11 @@ Each entry should support:
 | ID | Unique identifier |
 | Title | Required |
 | Description | Optional structured content |
-| Type | Optional entry classification |
 | Status | Pending, in progress, completed, cancelled |
 | Scheduled date | Optional primary date |
 | Scheduled time | Optional |
 | Descriptive end date | Optional metadata only |
-| Date purpose | Event, deadline or flexible task date |
+| What this date means | Event, Due by, or Maybe on |
 | Created timestamp | Creation time |
 | Updated timestamp | Last modification |
 | Completed timestamp | Actual completion time |
@@ -236,7 +228,7 @@ The title is the only mandatory field.
 
 If no date is selected, save the entry as Unscheduled.
 
-Avoid forcing users to select an entry type, relationship, date or reminder.
+Avoid requiring users to choose a date meaning, relationship, date or reminder.
 
 ### Expanded entry creation
 
@@ -247,7 +239,7 @@ Users may optionally expand the capture interface to add:
 - Date and time.
 - Recurrence.
 - Reminder.
-- Entry type.
+- What this date means (preselected from the user’s default).
 
 Both quick and expanded creation must use the same underlying Entry model.
 
@@ -591,7 +583,7 @@ Search should support:
 - Relevance ranking.
 - Date filters.
 - Status filters.
-- Entry type filters.
+- What this date means filters.
 
 Search should return the owning entry even when the matching content belongs to a note or checklist item.
 
@@ -610,7 +602,6 @@ Proposed entities:
 ### Entry
 - id: UUID/String primary key
 - title
-- type
 - status
 - scheduledDate
 - scheduledTime
@@ -622,6 +613,8 @@ Proposed entities:
 - recurrenceSeriesId
 - sourceEntryId
 - sourceContentId
+
+The former optional `entryType` column is deprecated legacy data only. It must not be assigned, exposed, searched, or used for presentation. It remains temporarily in Room storage and backup compatibility so existing ledgers can be opened without losing data.
 
 ### EntryRelationship
 - id
@@ -807,7 +800,7 @@ It should feel like a personal logbook rather than a productivity dashboard.
 - Compact but readable entry cards.
 - Clear typography.
 - Neutral colours.
-- Consistent visual language across entry types.
+- Consistent visual language across entries.
 - Status indicators that are immediately understandable.
 - Support light and dark themes.
 - Material 3 components where appropriate.
@@ -829,11 +822,10 @@ Each card should show relevant information:
 - Title.
 - Date/time where useful.
 - Status.
-- Optional entry type indicator.
 - Small relationship indicator when related entries exist.
 - Optional checklist progress.
 
-Different entry types may have subtle visual differences, but should share a consistent layout.
+Entries share a consistent layout; date meaning and status remain separate concepts.
 
 ### Entry interactions
 

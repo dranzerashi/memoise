@@ -25,6 +25,8 @@ import java.time.LocalTime
 data class EntryEntity(
     @PrimaryKey val id: String,
     val title: String,
+    // Legacy storage only; preserved until a safe schema/backup retirement plan is in place.
+    @Deprecated("Legacy database field; do not use for app behavior.")
     @ColumnInfo(name = "entryType") val type: EntryType?,
     val status: EntryStatus,
     val scheduledDate: LocalDate?,

@@ -34,3 +34,13 @@ Store skipped and moved occurrence dates under their existing series so generati
 ## D-008 — Repeat setup and removal
 
 Choose frequency and end date before generating a new repeat. Changing an existing end date does not erase entries already added. When removing the first entry, offer a choice to keep the other repeats or remove the entire repeat set.
+
+
+## D-009 — One date-meaning field
+
+Use **What this date means** (Event, Due by, Maybe on) consistently in capture, details, Settings, and Search. Do not expose a separate Task/Event/Occasion/Note kind selector.
+
+
+## D-010 — Retire separate entry type
+
+Use **What this date means** as the only entry classification in product behavior. Do not set, display, filter, or style entries by Task/Event/Occasion/Note type. Keep the old `entryType` database and backup field deprecated temporarily to preserve existing user data and compatibility.
