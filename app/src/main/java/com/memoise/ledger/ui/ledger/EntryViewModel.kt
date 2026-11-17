@@ -63,6 +63,11 @@ class EntryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
     )
+    val defaultReminderMinute: StateFlow<Int> = userPreferencesRepository.defaultReminderMinute.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = 9 * 60,
+    )
 
     fun setThemePreference(preference: ThemePreference) {
         viewModelScope.launch { userPreferencesRepository.setThemePreference(preference) }
@@ -74,6 +79,10 @@ class EntryViewModel @Inject constructor(
 
     fun clearRecentSearches() {
         viewModelScope.launch { userPreferencesRepository.clearRecentSearches() }
+    }
+
+    fun setDefaultReminderMinute(minute: Int) {
+        viewModelScope.launch { userPreferencesRepository.setDefaultReminderMinute(minute) }
     }
 
     fun searchEntries(

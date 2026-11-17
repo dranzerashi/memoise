@@ -50,3 +50,8 @@ This document records current product behavior. User-facing explanations will be
 ## About
 
 - Settings shows the Memoise name, short product description, app version, and a note that the ledger is stored locally unless the user exports a backup.
+
+## Notification settings
+
+- Settings shows whether Android allows Memoise to send notifications and links to Android’s notification settings for this app.
+- Set the starting time for newly created reminders. This does not create reminders automatically and does not change existing reminders.

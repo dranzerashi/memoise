@@ -1,10 +1,14 @@
 package com.memoise.ledger.ui.ledger
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.TimePickerDialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -57,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -92,6 +97,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import androidx.navigation.NavType
@@ -154,6 +162,7 @@ fun MemoiseApp(
     onEntryOpened: () -> Unit = {},
 ) {
     val entries by viewModel.entries.collectAsState()
+    val defaultReminderMinute by viewModel.defaultReminderMinute.collectAsState()
     val navController = rememberNavController()
     val context = LocalContext.current
     var restorePreview by remember { mutableStateOf<LedgerRestorePreview?>(null) }
@@ -320,6 +329,8 @@ fun MemoiseApp(
                     onOpenHelp = { navController.navigate(HELP_ROUTE) },
                     themePreference = viewModel.themePreference.collectAsState().value,
                     onThemePreferenceSelected = viewModel::setThemePreference,
+                    defaultReminderMinute = defaultReminderMinute,
+                    onDefaultReminderMinuteSelected = viewModel::setDefaultReminderMinute,
                     onExportJson = {
                         exportDocumentLauncher.launch("memoise-export-${LocalDate.now()}.json")
                     },
@@ -387,6 +398,7 @@ fun MemoiseApp(
                     }.collectAsState(initial = null)
                     EntryDetailScreen(
                         entry = entry,
+                        defaultReminderMinute = defaultReminderMinute,
                         entries = entries,
                         relationships = relationships,
                         checklist = checklist,
@@ -1071,6 +1083,8 @@ private fun SettingsScreen(
     onOpenHelp: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceSelected: (ThemePreference) -> Unit,
+    defaultReminderMinute: Int,
+    onDefaultReminderMinuteSelected: (Int) -> Unit,
     onExportJson: () -> Unit,
     onCreateDatabaseBackup: () -> Unit,
     onChooseRestoreFile: () -> Unit,
@@ -1080,6 +1094,23 @@ private fun SettingsScreen(
     onDismissRestore: () -> Unit,
     onConfirmRestore: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val notificationManager = remember(context) {
+        context.getSystemService(NotificationManager::class.java)
+    }
+    var notificationsAllowed by remember(notificationManager) {
+        mutableStateOf(notificationManager.areNotificationsEnabled())
+    }
+    DisposableEffect(lifecycleOwner, notificationManager) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsAllowed = notificationManager.areNotificationsEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         LedgerHeader(
             title = "Settings",
@@ -1119,6 +1150,62 @@ private fun SettingsScreen(
             modifier = Modifier.padding(start = 26.dp, top = 4.dp),
         ) {
             Text("Help with dates, repeats, and reminders")
+        }
+        Box(Modifier.padding(start = 26.dp, top = 20.dp)) {
+            SectionLabel("NOTIFICATIONS")
+        }
+        Text(
+            if (notificationsAllowed) {
+                "Notifications are on. Memoise can notify you about reminders."
+            } else {
+                "Notifications are off. Turn them on to receive reminders."
+            },
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(
+            onClick = {
+                val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                try {
+                    context.startActivity(notificationSettings)
+                } catch (_: ActivityNotFoundException) {
+                    val appSettings = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(appSettings)
+                }
+            },
+            modifier = Modifier.padding(start = 26.dp),
+        ) {
+            Text("Manage notification settings")
+        }
+        Text(
+            "Default time for new reminders",
+            modifier = Modifier.padding(start = 26.dp, top = 8.dp),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            "This sets the starting time when you add a reminder. It won’t create reminders automatically.",
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = {
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute -> onDefaultReminderMinuteSelected(hour * 60 + minute) },
+                    defaultReminderMinute / 60,
+                    defaultReminderMinute % 60,
+                    false,
+                ).show()
+            },
+            modifier = Modifier.padding(start = 26.dp, top = 4.dp),
+        ) {
+            val defaultTime = LocalTime.of(defaultReminderMinute / 60, defaultReminderMinute % 60)
+            Text(defaultTime.format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())))
         }
         Box(Modifier.padding(start = 26.dp, top = 12.dp)) {
             SectionLabel("BACKUP AND RESTORE")
@@ -1589,6 +1676,7 @@ private fun CaptureScreen(
 @Composable
 private fun EntryDetailScreen(
     entry: LedgerEntry,
+    defaultReminderMinute: Int,
     entries: List<LedgerEntry>,
     relationships: List<LedgerRelationship>,
     checklist: List<LedgerChecklistItem>,
@@ -1808,6 +1896,7 @@ private fun EntryDetailScreen(
                 ReminderSection(
                     entryId = entry.id,
                     entryDate = entry.scheduledDate,
+                    defaultReminderMinute = defaultReminderMinute,
                     allowPastRelative = allowPastRelativeReminder,
                     entryStatus = entry.status,
                     reminders = reminders,
@@ -2582,6 +2671,7 @@ private fun NoteRow(
 private fun ReminderSection(
     entryId: String,
     entryDate: LocalDate?,
+    defaultReminderMinute: Int,
     allowPastRelative: Boolean,
     entryStatus: EntryStatus,
     reminders: List<LedgerReminder>,
@@ -2661,6 +2751,7 @@ private fun ReminderSection(
         ReminderEditorDialog(
             reminder = editingReminder,
             entryDate = entryDate,
+            defaultReminderMinute = defaultReminderMinute,
             allowPastRelative = allowPastRelative,
             onDismiss = { showEditor = false },
             onSave = { current, triggerAt, relativeOffsetDays, minuteOfDay ->
@@ -3061,15 +3152,19 @@ private fun ReminderRow(
 private fun ReminderEditorDialog(
     reminder: LedgerReminder?,
     entryDate: LocalDate?,
+    defaultReminderMinute: Int,
     allowPastRelative: Boolean,
     onDismiss: () -> Unit,
     onSave: (LedgerReminder?, Long, Int?, Int?) -> Unit,
 ) {
     val context = LocalContext.current
-    val initialDateTime = remember(reminder?.id) {
+    val initialDateTime = remember(reminder?.id, defaultReminderMinute) {
         reminder?.triggerAt?.let { millis ->
             java.time.Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDateTime()
-        } ?: LocalDate.now().plusDays(1).atTime(9, 0)
+        } ?: LocalDate.now().plusDays(1).atTime(
+            defaultReminderMinute / 60,
+            defaultReminderMinute % 60,
+        )
     }
     var date by remember(reminder?.id) { mutableStateOf(initialDateTime.toLocalDate()) }
     var time by remember(reminder?.id) {

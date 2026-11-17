@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +35,8 @@ class UserPreferencesRepository @Inject constructor(
                 ?.toList()
                 .orEmpty()
         }
+    val defaultReminderMinute: Flow<Int> = context.userPreferencesDataStore.data
+        .map { preferences -> preferences[DEFAULT_REMINDER_MINUTE] ?: DEFAULT_REMINDER_TIME }
 
     suspend fun setThemePreference(preference: ThemePreference) {
         context.userPreferencesDataStore.edit { preferences ->
@@ -63,9 +66,19 @@ class UserPreferencesRepository @Inject constructor(
         }
     }
 
+    suspend fun setDefaultReminderMinute(minute: Int) {
+        require(minute in 0 until MINUTES_PER_DAY)
+        context.userPreferencesDataStore.edit { preferences ->
+            preferences[DEFAULT_REMINDER_MINUTE] = minute
+        }
+    }
+
     private companion object {
         val THEME_PREFERENCE = stringPreferencesKey("theme_preference")
         val RECENT_SEARCHES = stringPreferencesKey("recent_searches")
+        val DEFAULT_REMINDER_MINUTE = intPreferencesKey("default_reminder_minute")
         const val MAX_RECENT_SEARCHES = 5
+        const val DEFAULT_REMINDER_TIME = 9 * 60
+        const val MINUTES_PER_DAY = 24 * 60
     }
 }

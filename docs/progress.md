@@ -230,3 +230,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-09 — About Memoise
 
 - Added the app version, product description, and concise local-storage and backup information to Settings.
+
+## 2026-11-09 — Notification settings
+
+- Added notification permission status and a link to Android’s Memoise notification settings. Added a saved default time used to initialize newly created reminders; existing reminders are unchanged.
