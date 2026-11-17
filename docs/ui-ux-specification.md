@@ -412,7 +412,7 @@ Requirements:
 
 - Title is mandatory.
 - Everything else is optional.
-- No mandatory type selection.
+- “What this date means” uses the saved default and never blocks saving an entry.
 - No mandatory date selection.
 - Saving without a date creates an unscheduled entry.
 - Save should be immediately accessible.
@@ -548,7 +548,7 @@ Requirements:
 
 - Automatically establish the relationship.
 - Show the originating entry.
-- Use selected text as the initial title when conversion initiated the action.
+- Use the full paragraph as the initial title when conversion is initiated from its context menu.
 - Allow date assignment.
 - Allow no date.
 - Return to the original entry after creation.
@@ -575,7 +575,7 @@ Delete
 
 When multiple checklist items are selected, allow them to be converted together into a single new entry.
 
-When selecting a paragraph, allow the selected text to become the new entry's initial title.
+Long-pressing a whole paragraph opens its context menu. Use the full paragraph as the new entry's initial title; paragraph-level conversion is the intended interaction.
 
 Preserve the original content and maintain a link to the generated entry.
 

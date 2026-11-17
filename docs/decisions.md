@@ -44,3 +44,8 @@ Use **What this date means** (Event, Due by, Maybe on) consistently in capture, 
 ## D-010 — Retire separate entry type
 
 Use **What this date means** as the only entry classification in product behavior. Do not set, display, filter, or style entries by Task/Event/Occasion/Note type. Keep the old `entryType` database and backup field deprecated temporarily to preserve existing user data and compatibility.
+
+
+## D-011 — Convert description paragraphs as a whole
+
+Keep the current long-press action on a whole description paragraph and use the full paragraph as the new entry title. Partial text or sentence selection for conversion is out of scope.

@@ -293,9 +293,8 @@ Support:
 - Multiple paragraphs.
 - Editing existing paragraphs.
 - Adding and removing paragraphs.
-- Text selection within paragraphs.
-- Long-press contextual actions.
-- Converting selected text or a whole paragraph into a preparation or follow-up entry.
+- Long-press contextual actions on a whole paragraph.
+- Converting a whole paragraph into a preparation or follow-up entry.
 
 Each content block must have a stable identifier.
 
@@ -304,7 +303,7 @@ Do not identify content blocks through their text alone.
 When converting content into an entry:
 
 1. Preserve the original text.
-2. Create a new entry using the selected text as its initial title.
+2. Create a new entry using the full paragraph as its initial title.
 3. Create the appropriate relationship.
 4. Preserve the source content reference.
 5. Display a subtle indication that the content is linked to another entry.
@@ -1028,7 +1027,7 @@ Deliverable: A functional personal ledger.
 - Implement nested relationship navigation.
 - Implement structured description blocks.
 - Implement checklist items.
-- Implement conversion of description selections into entries.
+- Implement conversion of whole description paragraphs into entries.
 - Implement conversion of checklist items into entries.
 - Implement notes and activity history.
 
@@ -1112,7 +1111,7 @@ The first release is complete when the following scenario works end to end:
 4. User adds a checklist to Pack luggage.
 5. User long-presses "Medicines" and converts it into a separate preparation entry.
 6. User adds a description to Journey home.
-7. User selects a sentence and converts it into a follow-up entry.
+7. User converts a whole description paragraph into a follow-up entry.
 8. User creates a recurring anniversary.
 9. User creates an unscheduled entry and later assigns it a date.
 10. User creates an overdue task and sees it in the Overdue view without changing its original date.
@@ -1132,7 +1131,7 @@ Before implementing:
 
 1. Review the entire specification.
 2. Produce a proposed project structure.
-3. Identify any Android platform constraints, particularly around exact alarms, widgets, text selection and SQLite FTS support.
+3. Identify any Android platform constraints, particularly around exact alarms, widgets, paragraph context actions and SQLite FTS support.
 4. Propose the final Room schema and database relationships.
 5. Identify potential ambiguities or implementation risks.
 6. Present the implementation plan.

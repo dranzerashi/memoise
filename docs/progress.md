@@ -266,3 +266,8 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-17 — Deprecated duplicate entry type
 
 - Removed Task/Event/Occasion/Note type from active requirements and app behavior. **What this date means** is the only classification used by capture, details, and Search. The legacy database/backup field is retained only for compatibility.
+
+
+## 2026-11-18 — Description conversion scope
+
+- Kept conversion at the whole-paragraph level and aligned the requirements and UX specification with the current interaction. Partial sentence conversion is out of scope.
