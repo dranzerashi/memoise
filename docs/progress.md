@@ -242,3 +242,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-17 — Reminder during capture
 
 - Added optional custom or date-relative reminders during quick and related-entry capture. Entry, description, relationship, and reminder save together; relative timing follows the final entry date.
+
+## 2026-11-17 — Checklist during capture
+
+- Added optional checklist steps during quick and related-entry capture. The entry, checklist, description, reminder, and relationship are saved in the same transaction.

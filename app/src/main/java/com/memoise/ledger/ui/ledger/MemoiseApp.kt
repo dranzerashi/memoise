@@ -460,8 +460,8 @@ fun MemoiseApp(
                     heading = "New entry",
                     defaultReminderMinute = defaultReminderMinute,
                     onCancel = { navController.popBackStack() },
-                    onSave = { title, date, description, reminder ->
-                        viewModel.create(title, date, description, reminder)
+                    onSave = { title, date, description, reminder, checklistItems ->
+                        viewModel.create(title, date, description, reminder, checklistItems)
                         navController.popBackStack()
                     },
                 )
@@ -509,7 +509,7 @@ fun MemoiseApp(
                         initialTitle = sourceBlock?.content ?: sourceChecklistItems.joinToString(", ") { it.title },
                         defaultReminderMinute = defaultReminderMinute,
                         onCancel = { navController.popBackStack() },
-                        onSave = { title, date, description, reminder ->
+                        onSave = { title, date, description, reminder, checklistItems ->
                             viewModel.createRelated(
                                 parent.id,
                                 type,
@@ -519,6 +519,7 @@ fun MemoiseApp(
                                 sourceChecklistItemIds,
                                 description,
                                 reminder,
+                                checklistItems,
                             )
                             navController.popBackStack()
                         },
@@ -1587,12 +1588,15 @@ private fun CaptureScreen(
     initialTitle: String = "",
     defaultReminderMinute: Int,
     onCancel: () -> Unit,
-    onSave: (String, LocalDate?, String?, CaptureReminderDraft?) -> Unit,
+    onSave: (String, LocalDate?, String?, CaptureReminderDraft?, List<String>) -> Unit,
 ) {
     var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
     var description by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
     var showDescription by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    var checklistItems by remember(heading, initialTitle) { mutableStateOf(emptyList<String>()) }
+    var checklistStepDraft by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
+    var showChecklist by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var reminderDraft by rememberSaveable(heading, initialTitle) { mutableStateOf<CaptureReminderDraft?>(null) }
     var showReminderEditor by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var permissionDenied by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
@@ -1627,7 +1631,14 @@ private fun CaptureScreen(
     val saveEntry = {
         if (title.isNotBlank() && reminderIsValid) {
             focusManager.clearFocus()
-            onSave(title, date, description.takeIf(String::isNotBlank), reminderDraft)
+            val pendingStep = checklistStepDraft.trim().takeIf(String::isNotEmpty)
+            onSave(
+                title,
+                date,
+                description.takeIf(String::isNotBlank),
+                reminderDraft,
+                checklistItems + listOfNotNull(pendingStep),
+            )
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -1727,6 +1738,61 @@ private fun CaptureScreen(
             ) {
                 Text("Add description")
             }
+        }
+        if (!showChecklist) {
+            TextButton(
+                onClick = { showChecklist = true },
+                modifier = Modifier.padding(top = 2.dp),
+            ) {
+                Text("Add checklist")
+            }
+        } else {
+            SectionLabel("NEXT STEPS")
+            checklistItems.forEachIndexed { index, step ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("□", color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        step,
+                        modifier = Modifier.weight(1f).padding(start = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    TextButton(
+                        onClick = { checklistItems = checklistItems.filterIndexed { itemIndex, _ -> itemIndex != index } },
+                        modifier = Modifier.semantics {
+                            contentDescription = "Remove step ${index + 1}"
+                        },
+                    ) { Text("Remove") }
+                }
+            }
+            OutlinedTextField(
+                value = checklistStepDraft,
+                onValueChange = { checklistStepDraft = it },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                label = { Text("Add a step") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    val step = checklistStepDraft.trim()
+                    if (step.isNotEmpty()) {
+                        checklistItems = checklistItems + step
+                        checklistStepDraft = ""
+                    }
+                }),
+            )
+            TextButton(
+                onClick = {
+                    val step = checklistStepDraft.trim()
+                    if (step.isNotEmpty()) {
+                        checklistItems = checklistItems + step
+                        checklistStepDraft = ""
+                    }
+                },
+                enabled = checklistStepDraft.isNotBlank(),
+                modifier = Modifier.align(Alignment.End),
+            ) { Text("Add step") }
         }
         if (reminderDraft == null) {
             TextButton(

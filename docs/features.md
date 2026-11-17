@@ -60,3 +60,4 @@ This document records current product behavior. User-facing explanations will be
 
 - New-entry and related-entry capture can include an optional description paragraph. The entry, relationship, and paragraph are saved together; title remains the only required field.
 - Capture can also include an optional custom or relative reminder. Its initial time comes from the reminder default in Settings; creating a reminder still requires notification permission.
+- Capture can include an optional checklist with multiple steps. The steps save together with the entry and any relationship, description, or reminder.

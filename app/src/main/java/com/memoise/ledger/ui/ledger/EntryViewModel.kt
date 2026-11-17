@@ -222,10 +222,11 @@ class EntryViewModel @Inject constructor(
         scheduledDate: LocalDate?,
         description: String? = null,
         reminderDraft: CaptureReminderDraft? = null,
+        checklistItems: List<String> = emptyList(),
     ) {
         val entry = newEntry(title, scheduledDate) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
-        viewModelScope.launch { repository.create(entry, description, reminder) }
+        viewModelScope.launch { repository.create(entry, description, reminder, checklistItems) }
     }
 
     fun createRelated(
@@ -237,6 +238,7 @@ class EntryViewModel @Inject constructor(
         sourceChecklistItemIds: List<String> = emptyList(),
         description: String? = null,
         reminderDraft: CaptureReminderDraft? = null,
+        checklistItems: List<String> = emptyList(),
     ) {
         val sourceId = sourceContentId ?: sourceChecklistItemIds.singleOrNull()
         val entry = newEntry(
@@ -247,7 +249,15 @@ class EntryViewModel @Inject constructor(
         ) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch {
-            repository.createRelated(parentId, type, entry, sourceChecklistItemIds, description, reminder)
+            repository.createRelated(
+                parentId,
+                type,
+                entry,
+                sourceChecklistItemIds,
+                description,
+                reminder,
+                checklistItems,
+            )
         }
     }
 

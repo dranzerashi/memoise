@@ -91,6 +91,7 @@ interface EntryRepository {
         entry: LedgerEntry,
         description: String? = null,
         reminder: LedgerReminder? = null,
+        checklistItems: List<String> = emptyList(),
     )
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
@@ -101,6 +102,7 @@ interface EntryRepository {
         sourceChecklistItemIds: List<String> = emptyList(),
         description: String? = null,
         reminder: LedgerReminder? = null,
+        checklistItems: List<String> = emptyList(),
     )
     suspend fun addChecklistItem(entryId: String, title: String)
     suspend fun updateChecklistItem(item: LedgerChecklistItem)
@@ -719,7 +721,12 @@ class RoomEntryRepository @Inject constructor(
     override fun observeRecurrence(seriesId: String): Flow<LedgerRecurrenceSeries?> =
         recurrenceDao.observeById(seriesId).map { it?.toDomainOrNull() }
 
-    override suspend fun create(entry: LedgerEntry, description: String?, reminder: LedgerReminder?) {
+    override suspend fun create(
+        entry: LedgerEntry,
+        description: String?,
+        reminder: LedgerReminder?,
+        checklistItems: List<String>,
+    ) {
         val now = System.currentTimeMillis()
         require(reminder == null || reminder.entryId == entry.id) { "The reminder belongs to another entry." }
         database.withTransaction {
@@ -727,6 +734,7 @@ class RoomEntryRepository @Inject constructor(
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
             insertInitialDescription(entry.id, description, now)
             insertInitialReminder(entry.id, reminder)
+            insertInitialChecklistItems(entry.id, checklistItems, now)
         }
         reminder?.let { reminderScheduler.schedule(it.id, it.triggerAt) }
     }
@@ -781,6 +789,7 @@ class RoomEntryRepository @Inject constructor(
         sourceChecklistItemIds: List<String>,
         description: String?,
         reminder: LedgerReminder?,
+        checklistItems: List<String>,
     ) {
         require(parentId != entry.id) { "An entry cannot be related to itself." }
         database.withTransaction {
@@ -824,6 +833,7 @@ class RoomEntryRepository @Inject constructor(
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
             insertInitialDescription(entry.id, description, entry.createdAt)
             insertInitialReminder(entry.id, reminder)
+            insertInitialChecklistItems(entry.id, checklistItems, entry.createdAt)
             recordActivity(parentId, "${type.activityLabel()} added", entry.title)
         }
         reminder?.let { reminderScheduler.schedule(it.id, it.triggerAt) }
@@ -924,6 +934,24 @@ class RoomEntryRepository @Inject constructor(
         require(reminder.triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
         reminderDao.upsert(reminder.toEntity())
         recordActivity(entryId, "Reminder added", formatReminderTime(reminder.triggerAt), reminder.createdAt)
+    }
+
+    private suspend fun insertInitialChecklistItems(entryId: String, titles: List<String>, createdAt: Long) {
+        titles.map(String::trim).filter(String::isNotEmpty).forEachIndexed { index, title ->
+            checklistDao.upsert(
+                EntryChecklistEntity(
+                    id = java.util.UUID.randomUUID().toString(),
+                    entryId = entryId,
+                    title = title,
+                    completed = false,
+                    sortOrder = index,
+                    linkedEntryId = null,
+                    createdAt = createdAt,
+                    updatedAt = createdAt,
+                ),
+            )
+            recordActivity(entryId, "Checklist item added", title, createdAt)
+        }
     }
 
     override suspend fun updateDescriptionBlock(block: LedgerDescriptionBlock) {
