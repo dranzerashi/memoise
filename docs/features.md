@@ -55,3 +55,8 @@ This document records current product behavior. User-facing explanations will be
 
 - Settings shows whether Android allows Memoise to send notifications and links to Android’s notification settings for this app.
 - Set the starting time for newly created reminders. This does not create reminders automatically and does not change existing reminders.
+
+## Quick capture
+
+- New-entry and related-entry capture can include an optional description paragraph. The entry, relationship, and paragraph are saved together; title remains the only required field.
+- Capture can also include an optional custom or relative reminder. Its initial time comes from the reminder default in Settings; creating a reminder still requires notification permission.

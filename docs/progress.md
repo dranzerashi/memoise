@@ -234,3 +234,11 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-09 — Notification settings
 
 - Added notification permission status and a link to Android’s Memoise notification settings. Added a saved default time used to initialize newly created reminders; existing reminders are unchanged.
+
+## 2026-11-17 — Description during capture
+
+- Added an optional description paragraph to quick capture and related-entry capture. The description saves in the same database transaction as the entry and its relationship.
+
+## 2026-11-17 — Reminder during capture
+
+- Added optional custom or date-relative reminders during quick and related-entry capture. Entry, description, relationship, and reminder save together; relative timing follows the final entry date.

@@ -87,7 +87,11 @@ interface EntryRepository {
     fun observeNotes(entryId: String): Flow<List<LedgerNote>>
     fun observeReminders(entryId: String): Flow<List<LedgerReminder>>
     fun observeRecurrence(seriesId: String): Flow<LedgerRecurrenceSeries?>
-    suspend fun create(entry: LedgerEntry)
+    suspend fun create(
+        entry: LedgerEntry,
+        description: String? = null,
+        reminder: LedgerReminder? = null,
+    )
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
     suspend fun createRelated(
@@ -95,6 +99,8 @@ interface EntryRepository {
         type: RelationshipType,
         entry: LedgerEntry,
         sourceChecklistItemIds: List<String> = emptyList(),
+        description: String? = null,
+        reminder: LedgerReminder? = null,
     )
     suspend fun addChecklistItem(entryId: String, title: String)
     suspend fun updateChecklistItem(item: LedgerChecklistItem)
@@ -713,11 +719,16 @@ class RoomEntryRepository @Inject constructor(
     override fun observeRecurrence(seriesId: String): Flow<LedgerRecurrenceSeries?> =
         recurrenceDao.observeById(seriesId).map { it?.toDomainOrNull() }
 
-    override suspend fun create(entry: LedgerEntry) {
+    override suspend fun create(entry: LedgerEntry, description: String?, reminder: LedgerReminder?) {
+        val now = System.currentTimeMillis()
+        require(reminder == null || reminder.entryId == entry.id) { "The reminder belongs to another entry." }
         database.withTransaction {
             entryDao.upsert(entry.toEntity())
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
+            insertInitialDescription(entry.id, description, now)
+            insertInitialReminder(entry.id, reminder)
         }
+        reminder?.let { reminderScheduler.schedule(it.id, it.triggerAt) }
     }
 
     override suspend fun save(entry: LedgerEntry) {
@@ -768,6 +779,8 @@ class RoomEntryRepository @Inject constructor(
         type: RelationshipType,
         entry: LedgerEntry,
         sourceChecklistItemIds: List<String>,
+        description: String?,
+        reminder: LedgerReminder?,
     ) {
         require(parentId != entry.id) { "An entry cannot be related to itself." }
         database.withTransaction {
@@ -809,8 +822,11 @@ class RoomEntryRepository @Inject constructor(
                 )
             }
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
+            insertInitialDescription(entry.id, description, entry.createdAt)
+            insertInitialReminder(entry.id, reminder)
             recordActivity(parentId, "${type.activityLabel()} added", entry.title)
         }
+        reminder?.let { reminderScheduler.schedule(it.id, it.triggerAt) }
     }
 
     override suspend fun addChecklistItem(entryId: String, title: String) {
@@ -884,6 +900,30 @@ class RoomEntryRepository @Inject constructor(
             )
             recordActivity(entryId, "Description paragraph added", cleanContent, now)
         }
+    }
+
+    private suspend fun insertInitialDescription(entryId: String, content: String?, createdAt: Long) {
+        val cleanContent = content?.trim()?.takeIf(String::isNotEmpty) ?: return
+        val sortOrder = (descriptionBlockDao.maxSortOrder(entryId) ?: -1) + 1
+        descriptionBlockDao.upsert(
+            EntryDescriptionBlockEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                entryId = entryId,
+                content = cleanContent,
+                sortOrder = sortOrder,
+                createdAt = createdAt,
+                updatedAt = createdAt,
+            ),
+        )
+        recordActivity(entryId, "Description paragraph added", cleanContent, createdAt)
+    }
+
+    private suspend fun insertInitialReminder(entryId: String, reminder: LedgerReminder?) {
+        if (reminder == null) return
+        check(reminder.entryId == entryId) { "The reminder belongs to another entry." }
+        require(reminder.triggerAt > System.currentTimeMillis()) { "Choose a reminder time in the future." }
+        reminderDao.upsert(reminder.toEntity())
+        recordActivity(entryId, "Reminder added", formatReminderTime(reminder.triggerAt), reminder.createdAt)
     }
 
     override suspend fun updateDescriptionBlock(block: LedgerDescriptionBlock) {

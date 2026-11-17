@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -125,6 +126,7 @@ import com.memoise.ledger.domain.model.LedgerSearchMatch
 import com.memoise.ledger.domain.model.SearchDateFilter
 import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import com.memoise.ledger.domain.model.LedgerRestorePreview
+import com.memoise.ledger.domain.model.CaptureReminderDraft
 import com.memoise.ledger.data.preferences.ThemePreference
 import com.memoise.ledger.BuildConfig
 import java.time.LocalDate
@@ -456,9 +458,10 @@ fun MemoiseApp(
             composable(CAPTURE_ROUTE) {
                 CaptureScreen(
                     heading = "New entry",
+                    defaultReminderMinute = defaultReminderMinute,
                     onCancel = { navController.popBackStack() },
-                    onSave = { title, date ->
-                        viewModel.create(title, date)
+                    onSave = { title, date, description, reminder ->
+                        viewModel.create(title, date, description, reminder)
                         navController.popBackStack()
                     },
                 )
@@ -504,8 +507,9 @@ fun MemoiseApp(
                         heading = type.creationLabel(),
                         contextLabel = "For ${parent.title}",
                         initialTitle = sourceBlock?.content ?: sourceChecklistItems.joinToString(", ") { it.title },
+                        defaultReminderMinute = defaultReminderMinute,
                         onCancel = { navController.popBackStack() },
-                        onSave = { title, date ->
+                        onSave = { title, date, description, reminder ->
                             viewModel.createRelated(
                                 parent.id,
                                 type,
@@ -513,6 +517,8 @@ fun MemoiseApp(
                                 date,
                                 sourceContentId,
                                 sourceChecklistItemIds,
+                                description,
+                                reminder,
                             )
                             navController.popBackStack()
                         },
@@ -1579,17 +1585,49 @@ private fun CaptureScreen(
     heading: String,
     contextLabel: String? = null,
     initialTitle: String = "",
+    defaultReminderMinute: Int,
     onCancel: () -> Unit,
-    onSave: (String, LocalDate?) -> Unit,
+    onSave: (String, LocalDate?, String?, CaptureReminderDraft?) -> Unit,
 ) {
     var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
+    var description by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
+    var showDescription by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    var reminderDraft by rememberSaveable(heading, initialTitle) { mutableStateOf<CaptureReminderDraft?>(null) }
+    var showReminderEditor by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    var permissionDenied by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        permissionDenied = !granted
+        if (granted) showReminderEditor = true
+    }
+    val reminderDate = reminderDraft?.let { draft ->
+        draft.relativeOffsetDays?.let { offset -> date?.minusDays(offset.toLong()) } ?: draft.customDate
+    }
+    val reminderTriggerAt = reminderDraft?.let { draft ->
+        reminderDate?.atTime(draft.minuteOfDay / 60, draft.minuteOfDay % 60)
+            ?.atZone(ZoneId.systemDefault())
+            ?.toInstant()
+            ?.toEpochMilli()
+    }
+    val reminderIsValid = reminderTriggerAt == null || reminderTriggerAt > System.currentTimeMillis()
+    val openReminderEditor = {
+        val hasPermission = Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (hasPermission) {
+            showReminderEditor = true
+        } else {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val saveEntry = {
-        if (title.isNotBlank()) {
+        if (title.isNotBlank() && reminderIsValid) {
             focusManager.clearFocus()
-            onSave(title, date)
+            onSave(title, date, description.takeIf(String::isNotBlank), reminderDraft)
         }
     }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -1597,6 +1635,8 @@ private fun CaptureScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1608,7 +1648,7 @@ private fun CaptureScreen(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            TextButton(onClick = saveEntry, enabled = title.isNotBlank()) { Text("Save") }
+            TextButton(onClick = saveEntry, enabled = title.isNotBlank() && reminderIsValid) { Text("Save") }
         }
         Spacer(Modifier.height(36.dp))
         if (contextLabel != null) {
@@ -1669,6 +1709,88 @@ private fun CaptureScreen(
             onDateSelected = { date = it },
             label = "Add date",
             canRemoveDate = true,
+        )
+        if (showDescription) {
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                label = { Text("Add a paragraph") },
+                minLines = 2,
+            )
+        } else {
+            TextButton(
+                onClick = { showDescription = true },
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                Text("Add description")
+            }
+        }
+        if (reminderDraft == null) {
+            TextButton(
+                onClick = openReminderEditor,
+                modifier = Modifier.padding(top = 2.dp),
+            ) {
+                Text("Add reminder")
+            }
+        } else {
+            val draft = reminderDraft!!
+            val reminderTime = LocalTime.of(draft.minuteOfDay / 60, draft.minuteOfDay % 60)
+                .format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))
+            val patternLabel = draft.relativeOffsetDays?.let { offset ->
+                when (offset) {
+                    7 -> "1 week before"
+                    3 -> "3 days before"
+                    1 -> "1 day before"
+                    else -> "On the day"
+                }
+            } ?: "Custom reminder"
+            Text(
+                "$patternLabel · ${reminderDate?.let(::formatDate) ?: "Choose a date"} at $reminderTime",
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = openReminderEditor) { Text("Edit reminder") }
+                TextButton(onClick = { reminderDraft = null }) { Text("Remove") }
+            }
+            if (!reminderIsValid) {
+                Text(
+                    "This reminder time has passed. Choose a future time before saving.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        if (permissionDenied) {
+            Text(
+                "Allow notifications in Android Settings to add a reminder.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+    if (showReminderEditor) {
+        ReminderEditorDialog(
+            reminder = null,
+            entryDate = date,
+            defaultReminderMinute = defaultReminderMinute,
+            allowPastRelative = false,
+            onDismiss = { showReminderEditor = false },
+            onSave = { _, triggerAt, offsetDays, relativeMinute ->
+                val localTrigger = java.time.Instant.ofEpochMilli(triggerAt)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDateTime()
+                reminderDraft = CaptureReminderDraft(
+                    customDate = localTrigger.toLocalDate(),
+                    relativeOffsetDays = offsetDays,
+                    minuteOfDay = relativeMinute ?: localTrigger.hour * 60 + localTrigger.minute,
+                )
+                showReminderEditor = false
+            },
         )
     }
 }

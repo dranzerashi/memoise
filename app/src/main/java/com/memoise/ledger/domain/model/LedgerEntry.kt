@@ -85,6 +85,12 @@ data class LedgerReminder(
     val updatedAt: Long,
 )
 
+data class CaptureReminderDraft(
+    val customDate: LocalDate,
+    val relativeOffsetDays: Int?,
+    val minuteOfDay: Int,
+) : java.io.Serializable
+
 data class LedgerEntry(
     val id: String,
     val title: String,

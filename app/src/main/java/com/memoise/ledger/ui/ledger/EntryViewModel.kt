@@ -15,6 +15,7 @@ import com.memoise.ledger.domain.model.LedgerChecklistItem
 import com.memoise.ledger.domain.model.LedgerDescriptionBlock
 import com.memoise.ledger.domain.model.LedgerNote
 import com.memoise.ledger.domain.model.LedgerReminder
+import com.memoise.ledger.domain.model.CaptureReminderDraft
 import com.memoise.ledger.domain.model.LedgerRelationship
 import com.memoise.ledger.domain.model.LedgerRecurrenceSeries
 import com.memoise.ledger.domain.model.RecurrenceFrequency
@@ -27,6 +28,8 @@ import com.memoise.ledger.domain.model.LedgerRestorePreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -214,9 +217,15 @@ class EntryViewModel @Inject constructor(
         }
     }
 
-    fun create(title: String, scheduledDate: LocalDate?) {
+    fun create(
+        title: String,
+        scheduledDate: LocalDate?,
+        description: String? = null,
+        reminderDraft: CaptureReminderDraft? = null,
+    ) {
         val entry = newEntry(title, scheduledDate) ?: return
-        viewModelScope.launch { repository.create(entry) }
+        val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
+        viewModelScope.launch { repository.create(entry, description, reminder) }
     }
 
     fun createRelated(
@@ -226,6 +235,8 @@ class EntryViewModel @Inject constructor(
         scheduledDate: LocalDate?,
         sourceContentId: String? = null,
         sourceChecklistItemIds: List<String> = emptyList(),
+        description: String? = null,
+        reminderDraft: CaptureReminderDraft? = null,
     ) {
         val sourceId = sourceContentId ?: sourceChecklistItemIds.singleOrNull()
         val entry = newEntry(
@@ -234,8 +245,9 @@ class EntryViewModel @Inject constructor(
             sourceEntryId = if (sourceContentId != null || sourceChecklistItemIds.isNotEmpty()) parentId else null,
             sourceContentId = sourceId,
         ) ?: return
+        val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch {
-            repository.createRelated(parentId, type, entry, sourceChecklistItemIds)
+            repository.createRelated(parentId, type, entry, sourceChecklistItemIds, description, reminder)
         }
     }
 
@@ -367,6 +379,28 @@ class EntryViewModel @Inject constructor(
             scheduledDate = scheduledDate,
             sourceEntryId = sourceEntryId,
             sourceContentId = sourceContentId,
+            createdAt = now,
+            updatedAt = now,
+        )
+    }
+
+    private fun reminderForCapture(
+        entry: LedgerEntry,
+        draft: CaptureReminderDraft,
+    ): LedgerReminder {
+        val reminderDate = draft.relativeOffsetDays?.let { offset ->
+            requireNotNull(entry.scheduledDate) { "Add an entry date for a relative reminder." }
+                .minusDays(offset.toLong())
+        } ?: draft.customDate
+        val minute = LocalTime.of(draft.minuteOfDay / 60, draft.minuteOfDay % 60)
+        val now = System.currentTimeMillis()
+        return LedgerReminder(
+            id = UUID.randomUUID().toString(),
+            entryId = entry.id,
+            triggerAt = reminderDate.atTime(minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            enabled = true,
+            relativeOffsetDays = draft.relativeOffsetDays,
+            relativeMinuteOfDay = draft.relativeOffsetDays?.let { draft.minuteOfDay },
             createdAt = now,
             updatedAt = now,
         )
