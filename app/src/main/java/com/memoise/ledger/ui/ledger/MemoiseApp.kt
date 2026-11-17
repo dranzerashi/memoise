@@ -45,6 +45,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
@@ -102,8 +103,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.paging.LoadState
+import androidx.paging.PagingData
+import androidx.paging.insertSeparators
+import androidx.paging.map
+import androidx.paging.compose.collectAsLazyPagingItems
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -290,7 +297,8 @@ fun MemoiseApp(
         ) {
             composable(TIMELINE_ROUTE) {
                 TimelineScreen(
-                    entries = entries.filter { it.scheduledDate != null },
+                    timelineEntries = viewModel.timelineEntries,
+                    onReloadAroundToday = viewModel::reloadTimelineAroundToday,
                     onOpenEntry = { navController.navigate("entry/${it.id}") },
                     onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
@@ -551,33 +559,40 @@ private sealed interface TimelineItem {
 
 @Composable
 private fun TimelineScreen(
-    entries: List<LedgerEntry>,
+    timelineEntries: Flow<PagingData<LedgerEntry>>,
+    onReloadAroundToday: () -> Unit,
     onOpenEntry: (LedgerEntry) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val today = LocalDate.now()
-    val grouped = remember(entries) {
-        entries.filter { it.scheduledDate != null }
-            .groupBy { it.scheduledDate!! }
-            .toSortedMap()
-    }
-    val items = remember(grouped) {
-        buildList {
-            grouped.forEach { (date, dayEntries) ->
-                add(TimelineItem.DayHeader(date))
-                dayEntries.forEach { add(TimelineItem.EntryRowItem(it)) }
+    val timelineRows = remember(timelineEntries) {
+        timelineEntries.map { page ->
+            page.map { TimelineItem.EntryRowItem(it) }
+                .insertSeparators { before: TimelineItem.EntryRowItem?, after: TimelineItem.EntryRowItem? ->
+                    val date = after?.entry?.scheduledDate
+                    if (date != null && before?.entry?.scheduledDate != date) {
+                        TimelineItem.DayHeader(date)
+                    } else {
+                        null
+                    }
+                }
             }
-        }
     }
-    val todayIndex = items.indexOfFirst { it is TimelineItem.DayHeader && !it.date.isBefore(today) }
-        .let { if (it >= 0) it else (items.indexOfLast { item -> item is TimelineItem.DayHeader }) }
+    val timelineItems = timelineRows.collectAsLazyPagingItems()
+    val loadedRows = timelineItems.itemSnapshotList.items
+    val todayIndex = loadedRows.indexOfFirst { it is TimelineItem.DayHeader && !it.date.isBefore(today) }
+        .let { if (it >= 0) it else loadedRows.indexOfLast { item -> item is TimelineItem.DayHeader } }
     val listState = rememberLazyListState()
     var positionedNearToday by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(items.size) {
-        if (!positionedNearToday && items.isNotEmpty() && todayIndex >= 0) {
-            listState.scrollToItem(todayIndex)
-            positionedNearToday = true
+    LaunchedEffect(timelineItems.itemCount, timelineItems.loadState.refresh) {
+        if (!positionedNearToday && timelineItems.loadState.refresh is LoadState.NotLoading) {
+            if (todayIndex >= 0) {
+                listState.scrollToItem(todayIndex)
+                positionedNearToday = true
+            } else if (timelineItems.itemCount == 0) {
+                positionedNearToday = true
+            }
         }
     }
 
@@ -589,33 +604,56 @@ private fun TimelineScreen(
                 Row {
                     TextButton(
                         onClick = {
-                            if (todayIndex >= 0) listState.requestScrollToItem(todayIndex)
+                            if (todayIndex >= 0) {
+                                listState.requestScrollToItem(todayIndex)
+                            } else {
+                                positionedNearToday = false
+                                onReloadAroundToday()
+                            }
                         },
                     ) { Text("Today") }
                     TextButton(onClick = onOpenSettings) { Text("Settings") }
                 }
             },
         )
-        if (items.isEmpty()) {
-            EmptyLedgerState(
-                title = "Your ledger begins here",
-                message = "A quiet place for the things you want to remember.",
-                modifier = Modifier.weight(1f),
-            )
+        if (timelineItems.itemCount == 0) {
+            when (val refreshState = timelineItems.loadState.refresh) {
+                is LoadState.Loading -> Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+                is LoadState.Error -> EmptyLedgerState(
+                    title = "Couldn’t load your timeline",
+                    message = refreshState.error.localizedMessage ?: "Try loading your entries again.",
+                    modifier = Modifier.weight(1f),
+                    action = { TextButton(onClick = { timelineItems.retry() }) { Text("Try again") } },
+                )
+                is LoadState.NotLoading -> EmptyLedgerState(
+                    title = "Your ledger begins here",
+                    message = "A quiet place for the things you want to remember.",
+                    modifier = Modifier.weight(1f),
+                )
+            }
         } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 20.dp),
             ) {
-                items(items, key = TimelineItem::key) { item ->
-                    when (item) {
+                items(
+                    count = timelineItems.itemCount,
+                    key = { index -> timelineItems[index]?.key ?: "timeline-loading-$index" },
+                ) { index ->
+                    when (val item = timelineItems[index]) {
                         is TimelineItem.DayHeader -> DateSeparator(item.date)
                         is TimelineItem.EntryRowItem -> LedgerEntryRow(
                             entry = item.entry,
                             overdue = isOverdue(item.entry, today),
                             onClick = { onOpenEntry(item.entry) },
                         )
+                        null -> Unit
                     }
                 }
             }
@@ -1573,6 +1611,7 @@ private fun EmptyLedgerState(
     title: String,
     message: String,
     modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -1607,6 +1646,10 @@ private fun EmptyLedgerState(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        action?.let {
+            Spacer(Modifier.height(12.dp))
+            it()
+        }
     }
 }
 

@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import com.memoise.ledger.data.repository.EntryRepository
 import com.memoise.ledger.data.preferences.ThemePreference
 import com.memoise.ledger.data.preferences.UserPreferencesRepository
@@ -36,13 +38,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class EntryViewModel @Inject constructor(
     private val repository: EntryRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
@@ -50,6 +57,15 @@ class EntryViewModel @Inject constructor(
 ) : ViewModel() {
     private var pendingRestoreJson: String? = null
     private var pendingDatabaseRestore: java.io.File? = null
+    private val timelineAnchorGeneration = MutableStateFlow(0)
+    val timelineEntries: Flow<PagingData<LedgerEntry>> = timelineAnchorGeneration
+        .flatMapLatest { repository.observeTimelineEntries(LocalDate.now()) }
+        .cachedIn(viewModelScope)
+
+    fun reloadTimelineAroundToday() {
+        timelineAnchorGeneration.update { it + 1 }
+    }
+
     val entries: StateFlow<List<LedgerEntry>> = repository.observeEntries().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

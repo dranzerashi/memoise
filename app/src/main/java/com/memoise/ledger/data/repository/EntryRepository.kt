@@ -4,6 +4,10 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.room.withTransaction
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.map
 
 import com.memoise.ledger.data.database.EntryDao
 import com.memoise.ledger.data.database.EntryActivityDao
@@ -44,6 +48,8 @@ import com.memoise.ledger.domain.model.SearchRelationshipFilter
 import com.memoise.ledger.domain.model.LedgerRestorePreview
 import com.memoise.ledger.notifications.ReminderScheduler
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import javax.inject.Inject
@@ -63,8 +69,12 @@ import java.io.File
 import org.json.JSONObject
 import org.json.JSONArray
 
+private const val INITIAL_TIMELINE_PAGE_SIZE = 50
+private const val TIMELINE_PREFETCH_DISTANCE = 15
+
 interface EntryRepository {
     fun observeEntries(): Flow<List<LedgerEntry>>
+    fun observeTimelineEntries(today: LocalDate): Flow<PagingData<LedgerEntry>>
     suspend fun exportJson(): String
     suspend fun createDatabaseSnapshot(): File
     suspend fun inspectBackup(json: String): LedgerRestorePreview
@@ -150,6 +160,22 @@ class RoomEntryRepository @Inject constructor(
     private val recurrenceExceptionDao: RecurrenceExceptionDao,
     private val reminderScheduler: ReminderScheduler,
 ) : EntryRepository {
+    override fun observeTimelineEntries(today: LocalDate): Flow<PagingData<LedgerEntry>> = flow {
+        val entriesBeforeToday = entryDao.countScheduledBefore(today.toEpochDay())
+        val initialOffset = (entriesBeforeToday - INITIAL_TIMELINE_PAGE_SIZE / 2).coerceAtLeast(0)
+        val pager = Pager(
+            config = PagingConfig(
+                pageSize = INITIAL_TIMELINE_PAGE_SIZE,
+                initialLoadSize = INITIAL_TIMELINE_PAGE_SIZE,
+                prefetchDistance = TIMELINE_PREFETCH_DISTANCE,
+                enablePlaceholders = false,
+            ),
+            initialKey = initialOffset,
+            pagingSourceFactory = entryDao::pageTimeline,
+        )
+        emitAll(pager.flow.map { page -> page.map(EntryEntity::toDomain) })
+    }
+
     override suspend fun createDatabaseSnapshot(): File {
         val db = database.openHelper.writableDatabase
         val cursor = db.query("SELECT sqlite_version()")

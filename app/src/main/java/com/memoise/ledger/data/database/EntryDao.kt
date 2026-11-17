@@ -3,6 +3,7 @@ package com.memoise.ledger.data.database
 import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
+import androidx.paging.PagingSource
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -16,6 +17,20 @@ interface EntryDao {
                      createdAt ASC""",
     )
     fun observeAll(): Flow<List<EntryEntity>>
+
+    @Query(
+        """SELECT * FROM ledger_entries
+            WHERE scheduledDate IS NOT NULL
+            ORDER BY scheduledDate ASC,
+                     CASE WHEN scheduledTime IS NULL THEN 1 ELSE 0 END,
+                     scheduledTime ASC,
+                     createdAt ASC,
+                     id ASC""",
+    )
+    fun pageTimeline(): PagingSource<Int, EntryEntity>
+
+    @Query("SELECT COUNT(*) FROM ledger_entries WHERE scheduledDate < :epochDay")
+    suspend fun countScheduledBefore(epochDay: Long): Int
 
     @Query("SELECT id FROM ledger_entries WHERE id = :id LIMIT 1")
     suspend fun findId(id: String): String?

@@ -276,3 +276,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-18 — Scheduled time for entries
 
 - Added optional scheduled times during capture and entry editing, shown alongside dates in the ledger, Search results, and linked-entry lists. Removing an entry date clears its scheduled time. The time picker follows the device’s 12/24-hour setting and remains separate from reminders.
+
+## 2026-11-18 — Paginated timeline
+
+- Switched the dated timeline to load entries in pages around today, with nearby pages loading as the user scrolls.
