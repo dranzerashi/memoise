@@ -271,3 +271,8 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-18 — Description conversion scope
 
 - Kept conversion at the whole-paragraph level and aligned the requirements and UX specification with the current interaction. Partial sentence conversion is out of scope.
+
+
+## 2026-11-18 — Scheduled time for entries
+
+- Added optional scheduled times during capture and entry editing, shown alongside dates in the ledger, Search results, and linked-entry lists. Removing an entry date clears its scheduled time. The time picker follows the device’s 12/24-hour setting and remains separate from reminders.

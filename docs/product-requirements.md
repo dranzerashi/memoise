@@ -219,7 +219,7 @@ A user should be able to capture something in a few seconds and enrich it later.
 Provide a lightweight capture screen containing:
 
 - Title input.
-- Optional date selector.
+- Optional date and time selector.
 - Optional description.
 - Optional reminder.
 - Save action.

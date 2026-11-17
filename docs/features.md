@@ -64,3 +64,4 @@ This document records current product behavior. User-facing explanations will be
 - Capture can also include an optional custom or relative reminder. Its initial time comes from the reminder default in Settings; creating a reminder still requires notification permission.
 - Capture can include an optional checklist with multiple steps. The steps save together with the entry and any relationship, description, or reminder.
 - **What this date means** is shown directly during capture and in entry details, using the same choices: **Event**, **Due by**, or **Maybe on**. New entries default to Event; choose another default in Settings.
+- Add an optional scheduled time after choosing an entry date. The time appears with dated entries and is separate from reminder time; removing the date also removes its scheduled time.

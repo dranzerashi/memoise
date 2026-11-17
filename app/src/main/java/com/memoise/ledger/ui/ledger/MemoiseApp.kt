@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.net.Uri
 import android.provider.Settings
+import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -463,8 +464,8 @@ fun MemoiseApp(
                     defaultReminderMinute = defaultReminderMinute,
                     defaultDatePurpose = defaultDatePurpose,
                     onCancel = { navController.popBackStack() },
-                    onSave = { title, date, description, reminder, checklistItems, datePurpose ->
-                        viewModel.create(title, date, description, reminder, checklistItems, datePurpose)
+                    onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose ->
+                        viewModel.create(title, date, description, reminder, checklistItems, datePurpose, scheduledTime)
                         navController.popBackStack()
                     },
                 )
@@ -513,7 +514,7 @@ fun MemoiseApp(
                         defaultReminderMinute = defaultReminderMinute,
                         defaultDatePurpose = defaultDatePurpose,
                         onCancel = { navController.popBackStack() },
-                        onSave = { title, date, description, reminder, checklistItems, datePurpose ->
+                        onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose ->
                             viewModel.createRelated(
                                 parent.id,
                                 type,
@@ -525,6 +526,7 @@ fun MemoiseApp(
                                 reminder,
                                 checklistItems,
                                 datePurpose,
+                                scheduledTime,
                             )
                             navController.popBackStack()
                         },
@@ -972,6 +974,7 @@ private fun SearchResultRow(
         )
         val details = buildList {
             entry.scheduledDate?.let { add(formatDate(it)) }
+            entry.scheduledTime?.let { add(formatTime(it)) }
             if (entry.status != EntryStatus.PENDING) add(entry.status.displayName())
         }.joinToString(" · ")
         if (details.isNotBlank()) {
@@ -1536,13 +1539,16 @@ private fun LedgerEntryRow(
                 color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant
                 else MaterialTheme.colorScheme.onSurface,
             )
-            val supportingText = when {
-                overdue -> entry.scheduledDate?.let { overdueLabel(it) }
-                entry.status == EntryStatus.IN_PROGRESS -> "In progress"
-                entry.status == EntryStatus.COMPLETED -> "Done"
-                entry.status == EntryStatus.CANCELLED -> "Cancelled"
-                else -> null
-            }
+            val supportingText = buildList {
+                if (overdue) entry.scheduledDate?.let { add(overdueLabel(it)) }
+                entry.scheduledTime?.let { add(formatTime(it)) }
+                when (entry.status) {
+                    EntryStatus.IN_PROGRESS -> add("In progress")
+                    EntryStatus.COMPLETED -> add("Done")
+                    EntryStatus.CANCELLED -> add("Cancelled")
+                    EntryStatus.PENDING -> Unit
+                }
+            }.joinToString(" · ").takeIf(String::isNotBlank)
             if (supportingText != null) {
                 Text(
                     text = supportingText,
@@ -1612,10 +1618,12 @@ private fun CaptureScreen(
     defaultReminderMinute: Int,
     defaultDatePurpose: DatePurpose,
     onCancel: () -> Unit,
-    onSave: (String, LocalDate?, String?, CaptureReminderDraft?, List<String>, DatePurpose) -> Unit,
+    onSave: (String, LocalDate?, LocalTime?, String?, CaptureReminderDraft?, List<String>, DatePurpose) -> Unit,
 ) {
     var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
+    var scheduledTimeText by rememberSaveable { mutableStateOf<String?>(null) }
+    val scheduledTime = scheduledTimeText?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
     var description by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
     var showDescription by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var checklistItems by remember(heading, initialTitle) { mutableStateOf(emptyList<String>()) }
@@ -1666,6 +1674,7 @@ private fun CaptureScreen(
             onSave(
                 title,
                 date,
+                scheduledTime,
                 description.takeIf(String::isNotBlank),
                 reminderDraft,
                 checklistItems + listOfNotNull(pendingStep),
@@ -1755,9 +1764,15 @@ private fun CaptureScreen(
         Spacer(Modifier.height(23.dp))
         DatePickerControl(
             date = date,
-            onDateSelected = { date = it },
+            onDateSelected = {
+                date = it
+                if (it == null) scheduledTimeText = null
+            },
             label = "Add date",
             canRemoveDate = true,
+            includeTime = true,
+            time = scheduledTime,
+            onTimeSelected = { scheduledTimeText = it?.toString() },
         )
         if (showDescription) {
             OutlinedTextField(
@@ -2024,9 +2039,19 @@ private fun EntryDetailScreen(
                 Spacer(Modifier.height(16.dp))
                 DatePickerControl(
                     date = entry.scheduledDate,
-                    onDateSelected = { onUpdate(entry.copy(scheduledDate = it)) },
+                    onDateSelected = { selectedDate ->
+                        onUpdate(
+                            entry.copy(
+                                scheduledDate = selectedDate,
+                                scheduledTime = if (selectedDate == null) null else entry.scheduledTime,
+                            ),
+                        )
+                    },
                     label = "Add date",
                     canRemoveDate = true,
+                    includeTime = true,
+                    time = entry.scheduledTime,
+                    onTimeSelected = { onUpdate(entry.copy(scheduledTime = it)) },
                 )
                 Spacer(Modifier.height(12.dp))
                 if (entry.scheduledDate != null) {
@@ -3687,6 +3712,7 @@ private fun RelationshipRow(
             )
             val details = buildList {
                 entry.scheduledDate?.let { add(formatDate(it)) }
+                entry.scheduledTime?.let { add(formatTime(it)) }
                 if (entry.status == EntryStatus.COMPLETED) add("Done")
                 if (entry.status == EntryStatus.IN_PROGRESS) add("In progress")
                 if (entry.status == EntryStatus.CANCELLED) add("Cancelled")
@@ -3716,27 +3742,65 @@ private fun DatePickerControl(
     onDateSelected: (LocalDate?) -> Unit,
     label: String,
     canRemoveDate: Boolean = false,
+    includeTime: Boolean = false,
+    time: LocalTime? = null,
+    onTimeSelected: (LocalTime?) -> Unit = {},
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(
-            modifier = Modifier.semantics {
-                contentDescription = date?.let { "Change date, ${formatDate(it)}" } ?: label
-            },
-            onClick = { showPicker = true },
-        ) {
-            if (date != null) {
-                Text(formatDate(date))
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("◷", modifier = Modifier.clearAndSetSemantics {})
-                    Spacer(Modifier.width(8.dp))
-                    Text(label)
+    val context = LocalContext.current
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                modifier = Modifier.semantics {
+                    contentDescription = date?.let { "Change date, ${formatDate(it)}" } ?: label
+                },
+                onClick = { showPicker = true },
+            ) {
+                if (date != null) {
+                    Text(formatDate(date))
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("◷", modifier = Modifier.clearAndSetSemantics {})
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
                 }
             }
+            if (canRemoveDate && date != null && !includeTime) {
+                TextButton(onClick = { onDateSelected(null) }) { Text("Remove date") }
+            }
         }
-        if (canRemoveDate && date != null) {
-            TextButton(onClick = { onDateSelected(null) }) { Text("Remove date") }
+        if (includeTime && date != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        val initialTime = time ?: LocalTime.now().withSecond(0).withNano(0)
+                        TimePickerDialog(
+                            context,
+                            { _, hour, minute -> onTimeSelected(LocalTime.of(hour, minute)) },
+                            initialTime.hour,
+                            initialTime.minute,
+                            DateFormat.is24HourFormat(context),
+                        ).show()
+                    },
+                    modifier = Modifier.semantics {
+                        contentDescription = time?.let { "Change scheduled time, ${formatTime(it)}" }
+                            ?: "Add scheduled time"
+                    },
+                ) {
+                    Text(time?.let(::formatTime) ?: "Add time")
+                }
+                if (time != null) {
+                    TextButton(
+                        onClick = { onTimeSelected(null) },
+                        modifier = Modifier.semantics { contentDescription = "Remove scheduled time" },
+                    ) { Text("×") }
+                }
+                if (canRemoveDate) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { onDateSelected(null) }) { Text("Remove date") }
+                }
+            }
         }
     }
     if (showPicker) {
@@ -3835,6 +3899,12 @@ private fun monthDayLabel(date: LocalDate): String = date
 
 private fun formatDate(date: LocalDate): String = date
     .format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault()))
+
+private fun formatTime(time: LocalTime): String = time
+    .format(
+        DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
+            .withLocale(Locale.getDefault()),
+    )
 
 private fun formatDateTime(timestamp: Long): String = java.time.Instant.ofEpochMilli(timestamp)
     .atZone(java.time.ZoneId.systemDefault())

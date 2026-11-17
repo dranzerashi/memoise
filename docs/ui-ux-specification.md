@@ -394,6 +394,7 @@ Suggested layout:
 │ ─────────────────────────────── │
 │                                 │
 │ ◷  Add date                     │
+│    Add time (after a date)      │
 │                                 │
 │ ≡  Add description              │
 │                                 │
@@ -410,6 +411,7 @@ The title should receive focus automatically.
 
 Requirements:
 
+- A scheduled time can be added after choosing a date; it remains separate from reminder time.
 - Title is mandatory.
 - Everything else is optional.
 - “What this date means” uses the saved default and never blocks saving an entry.

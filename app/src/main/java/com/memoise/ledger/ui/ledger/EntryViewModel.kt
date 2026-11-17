@@ -232,8 +232,9 @@ class EntryViewModel @Inject constructor(
         reminderDraft: CaptureReminderDraft? = null,
         checklistItems: List<String> = emptyList(),
         datePurpose: DatePurpose = DatePurpose.EVENT,
+        scheduledTime: LocalTime? = null,
     ) {
-        val entry = newEntry(title, scheduledDate, datePurpose = datePurpose) ?: return
+        val entry = newEntry(title, scheduledDate, datePurpose = datePurpose, scheduledTime = scheduledTime) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch { repository.create(entry, description, reminder, checklistItems) }
     }
@@ -249,6 +250,7 @@ class EntryViewModel @Inject constructor(
         reminderDraft: CaptureReminderDraft? = null,
         checklistItems: List<String> = emptyList(),
         datePurpose: DatePurpose = DatePurpose.EVENT,
+        scheduledTime: LocalTime? = null,
     ) {
         val sourceId = sourceContentId ?: sourceChecklistItemIds.singleOrNull()
         val entry = newEntry(
@@ -257,6 +259,7 @@ class EntryViewModel @Inject constructor(
             sourceEntryId = if (sourceContentId != null || sourceChecklistItemIds.isNotEmpty()) parentId else null,
             sourceContentId = sourceId,
             datePurpose = datePurpose,
+            scheduledTime = scheduledTime,
         ) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
         viewModelScope.launch {
@@ -391,6 +394,7 @@ class EntryViewModel @Inject constructor(
         sourceEntryId: String? = null,
         sourceContentId: String? = null,
         datePurpose: DatePurpose = DatePurpose.EVENT,
+        scheduledTime: LocalTime? = null,
     ): LedgerEntry? {
         val cleanTitle = title.trim()
         if (cleanTitle.isBlank()) return null
@@ -400,6 +404,7 @@ class EntryViewModel @Inject constructor(
             title = cleanTitle,
             datePurpose = datePurpose,
             scheduledDate = scheduledDate,
+            scheduledTime = scheduledTime.takeIf { scheduledDate != null },
             sourceEntryId = sourceEntryId,
             sourceContentId = sourceContentId,
             createdAt = now,
