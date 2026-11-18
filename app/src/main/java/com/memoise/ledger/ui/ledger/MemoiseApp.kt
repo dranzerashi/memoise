@@ -71,6 +71,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1691,7 +1692,14 @@ private fun CaptureScreen(
     val scheduledTime = scheduledTimeText?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
     var description by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
     var showDescription by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
-    var checklistItems by remember(heading, initialTitle) { mutableStateOf(emptyList<String>()) }
+    var checklistItems by rememberSaveable(
+        heading,
+        initialTitle,
+        stateSaver = listSaver(
+            save = { it },
+            restore = { it },
+        ),
+    ) { mutableStateOf(emptyList<String>()) }
     var checklistStepDraft by rememberSaveable(heading, initialTitle) { mutableStateOf("") }
     var showChecklist by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var datePurposeLabel by rememberSaveable(heading, initialTitle, defaultDatePurpose) {

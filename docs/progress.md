@@ -284,3 +284,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-18 — Repeat setup during capture
 
 - Added optional repeat frequency and end-date setup to new-entry capture. The entry and repeat series are saved together before future entries are generated.
+
+## 2026-11-18 — Capture draft restoration
+
+- Made added checklist steps survive Android process recreation while the capture screen remains open.
