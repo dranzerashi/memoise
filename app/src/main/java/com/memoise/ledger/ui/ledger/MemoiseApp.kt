@@ -469,11 +469,22 @@ fun MemoiseApp(
             composable(CAPTURE_ROUTE) {
                 CaptureScreen(
                     heading = "New entry",
+                    allowRecurrence = true,
                     defaultReminderMinute = defaultReminderMinute,
                     defaultDatePurpose = defaultDatePurpose,
                     onCancel = { navController.popBackStack() },
-                    onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose ->
-                        viewModel.create(title, date, description, reminder, checklistItems, datePurpose, scheduledTime)
+                    onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose, recurrenceFrequency, recurrenceEndDate ->
+                        viewModel.create(
+                            title,
+                            date,
+                            description,
+                            reminder,
+                            checklistItems,
+                            datePurpose,
+                            scheduledTime,
+                            recurrenceFrequency,
+                            recurrenceEndDate,
+                        )
                         navController.popBackStack()
                     },
                 )
@@ -522,7 +533,7 @@ fun MemoiseApp(
                         defaultReminderMinute = defaultReminderMinute,
                         defaultDatePurpose = defaultDatePurpose,
                         onCancel = { navController.popBackStack() },
-                        onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose ->
+                        onSave = { title, date, scheduledTime, description, reminder, checklistItems, datePurpose, _, _ ->
                             viewModel.createRelated(
                                 parent.id,
                                 type,
@@ -1658,10 +1669,21 @@ private fun CaptureScreen(
     heading: String,
     contextLabel: String? = null,
     initialTitle: String = "",
+    allowRecurrence: Boolean = false,
     defaultReminderMinute: Int,
     defaultDatePurpose: DatePurpose,
     onCancel: () -> Unit,
-    onSave: (String, LocalDate?, LocalTime?, String?, CaptureReminderDraft?, List<String>, DatePurpose) -> Unit,
+    onSave: (
+        String,
+        LocalDate?,
+        LocalTime?,
+        String?,
+        CaptureReminderDraft?,
+        List<String>,
+        DatePurpose,
+        RecurrenceFrequency?,
+        LocalDate?,
+    ) -> Unit,
 ) {
     var title by rememberSaveable(heading, initialTitle) { mutableStateOf(initialTitle) }
     var date by rememberSaveable { mutableStateOf<LocalDate?>(null) }
@@ -1678,6 +1700,15 @@ private fun CaptureScreen(
     var reminderDraft by rememberSaveable(heading, initialTitle) { mutableStateOf<CaptureReminderDraft?>(null) }
     var showReminderEditor by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
     var permissionDenied by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    var recurrenceFrequencyName by rememberSaveable(heading, initialTitle) { mutableStateOf<String?>(null) }
+    var recurrenceEndEpochDay by rememberSaveable(heading, initialTitle) { mutableStateOf<Long?>(null) }
+    var showRecurrenceSetup by rememberSaveable(heading, initialTitle) { mutableStateOf(false) }
+    val recurrenceFrequency = recurrenceFrequencyName
+        ?.let { runCatching { RecurrenceFrequency.valueOf(it) }.getOrNull() }
+    val recurrenceEndDate = recurrenceEndEpochDay?.let(LocalDate::ofEpochDay)
+    val firstDate = date
+    val recurrenceIsValid = recurrenceFrequency == null ||
+        (firstDate != null && (recurrenceEndDate == null || !recurrenceEndDate.isBefore(firstDate)))
     val focusRequester = remember { FocusRequester() }
     val descriptionFocusRequester = remember { FocusRequester() }
     val checklistFocusRequester = remember { FocusRequester() }
@@ -1711,7 +1742,7 @@ private fun CaptureScreen(
         }
     }
     val saveEntry = {
-        if (title.isNotBlank() && reminderIsValid) {
+        if (title.isNotBlank() && reminderIsValid && recurrenceIsValid) {
             focusManager.clearFocus()
             val pendingStep = checklistStepDraft.trim().takeIf(String::isNotEmpty)
             onSave(
@@ -1722,6 +1753,8 @@ private fun CaptureScreen(
                 reminderDraft,
                 checklistItems + listOfNotNull(pendingStep),
                 datePurposeOptions[datePurposeLabel] ?: DatePurpose.EVENT,
+                recurrenceFrequency,
+                recurrenceEndDate,
             )
         }
     }
@@ -1749,7 +1782,10 @@ private fun CaptureScreen(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            TextButton(onClick = saveEntry, enabled = title.isNotBlank() && reminderIsValid) { Text("Save") }
+            TextButton(
+                onClick = saveEntry,
+                enabled = title.isNotBlank() && reminderIsValid && recurrenceIsValid,
+            ) { Text("Save") }
         }
         Spacer(Modifier.height(36.dp))
         if (contextLabel != null) {
@@ -1809,7 +1845,11 @@ private fun CaptureScreen(
             date = date,
             onDateSelected = {
                 date = it
-                if (it == null) scheduledTimeText = null
+                if (it == null) {
+                    scheduledTimeText = null
+                    recurrenceFrequencyName = null
+                    recurrenceEndEpochDay = null
+                }
             },
             label = "Add date",
             canRemoveDate = true,
@@ -1817,6 +1857,47 @@ private fun CaptureScreen(
             time = scheduledTime,
             onTimeSelected = { scheduledTimeText = it?.toString() },
         )
+        if (allowRecurrence) {
+            Spacer(Modifier.height(12.dp))
+            SectionLabel("REPEAT")
+            when {
+                date == null -> {
+                    TextButton(onClick = {}, enabled = false) { Text("Add repeat") }
+                    Text(
+                        "Add a date before setting a repeat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                recurrenceFrequency == null -> {
+                    TextButton(onClick = { showRecurrenceSetup = true }) { Text("Add repeat") }
+                }
+                else -> {
+                    Text(
+                        text = "Repeats ${recurrenceFrequency.label.lowercase()}" +
+                            (recurrenceEndDate?.let { " through ${formatDate(it)}" } ?: " · Never ends"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Row {
+                        TextButton(onClick = { showRecurrenceSetup = true }) { Text("Change") }
+                        TextButton(
+                            onClick = {
+                                recurrenceFrequencyName = null
+                                recurrenceEndEpochDay = null
+                            },
+                        ) { Text("Remove") }
+                    }
+                }
+            }
+            if (!recurrenceIsValid) {
+                Text(
+                    "The repeat end date must be on or after the entry date. Change the repeat or remove it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
         if (showDescription) {
             OutlinedTextField(
                 value = description,
@@ -1967,6 +2048,23 @@ private fun CaptureScreen(
                 showReminderEditor = false
             },
         )
+    }
+    if (allowRecurrence && showRecurrenceSetup) {
+        date?.let { selectedDate ->
+            RecurrenceSetupDialog(
+                firstDate = selectedDate,
+                initialFrequency = recurrenceFrequency ?: RecurrenceFrequency.WEEKLY,
+                initialEndDate = recurrenceEndDate,
+                editingExistingRepeat = false,
+                draftForCapture = true,
+                onDismiss = { showRecurrenceSetup = false },
+                onSave = { frequency, endDate ->
+                    recurrenceFrequencyName = frequency.name
+                    recurrenceEndEpochDay = endDate?.toEpochDay()
+                    showRecurrenceSetup = false
+                },
+            )
+        }
     }
 }
 
@@ -3263,6 +3361,7 @@ private fun RecurrenceSetupDialog(
     initialFrequency: RecurrenceFrequency,
     initialEndDate: LocalDate?,
     editingExistingRepeat: Boolean,
+    draftForCapture: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (RecurrenceFrequency, LocalDate?) -> Unit,
 ) {
@@ -3332,6 +3431,12 @@ private fun RecurrenceSetupDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else if (draftForCapture) {
+                    Text(
+                        "Repeats are added when you save this entry.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Text(
                         "You can change this later. Repeats are added after you start.",
@@ -3347,7 +3452,13 @@ private fun RecurrenceSetupDialog(
                 enabled = canApply,
                 onClick = { onSave(frequency, endDate) },
             ) {
-                Text(if (editingExistingRepeat) "Apply changes" else "Start repeating")
+                Text(
+                    when {
+                        editingExistingRepeat -> "Apply changes"
+                        draftForCapture -> "Use repeat"
+                        else -> "Start repeating"
+                    },
+                )
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

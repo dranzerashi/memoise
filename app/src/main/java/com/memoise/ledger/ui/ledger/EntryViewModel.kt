@@ -249,10 +249,21 @@ class EntryViewModel @Inject constructor(
         checklistItems: List<String> = emptyList(),
         datePurpose: DatePurpose = DatePurpose.EVENT,
         scheduledTime: LocalTime? = null,
+        recurrenceFrequency: RecurrenceFrequency? = null,
+        recurrenceEndDate: LocalDate? = null,
     ) {
         val entry = newEntry(title, scheduledDate, datePurpose = datePurpose, scheduledTime = scheduledTime) ?: return
         val reminder = reminderDraft?.let { reminderForCapture(entry, it) }
-        viewModelScope.launch { repository.create(entry, description, reminder, checklistItems) }
+        viewModelScope.launch {
+            repository.create(
+                entry,
+                description,
+                reminder,
+                checklistItems,
+                recurrenceFrequency,
+                recurrenceEndDate,
+            )
+        }
     }
 
     fun createRelated(

@@ -102,6 +102,8 @@ interface EntryRepository {
         description: String? = null,
         reminder: LedgerReminder? = null,
         checklistItems: List<String> = emptyList(),
+        recurrenceFrequency: RecurrenceFrequency? = null,
+        recurrenceEndDate: LocalDate? = null,
     )
     suspend fun save(entry: LedgerEntry)
     suspend fun setStatus(entry: LedgerEntry, status: EntryStatus)
@@ -752,17 +754,27 @@ class RoomEntryRepository @Inject constructor(
         description: String?,
         reminder: LedgerReminder?,
         checklistItems: List<String>,
+        recurrenceFrequency: RecurrenceFrequency?,
+        recurrenceEndDate: LocalDate?,
     ) {
         val now = System.currentTimeMillis()
         require(reminder == null || reminder.entryId == entry.id) { "The reminder belongs to another entry." }
-        database.withTransaction {
-            entryDao.upsert(entry.toEntity())
+        val series = database.withTransaction {
+            check(recurrenceFrequency != null || recurrenceEndDate == null) {
+                "Choose a repeat frequency before setting an end date."
+            }
+            val entryEntity = entry.toEntity()
+            entryDao.upsert(entryEntity)
             recordActivity(entry.id, "Entry created", entry.title, entry.createdAt)
             insertInitialDescription(entry.id, description, now)
             insertInitialReminder(entry.id, reminder)
             insertInitialChecklistItems(entry.id, checklistItems, now)
+            recurrenceFrequency?.let { frequency ->
+                createRecurrenceSeries(entryEntity, frequency, recurrenceEndDate, now)
+            }
         }
         reminder?.let { reminderScheduler.schedule(it.id, it.triggerAt) }
+        series?.let { generateOccurrences(it) }
     }
 
     override suspend fun save(entry: LedgerEntry) {
@@ -1167,33 +1179,43 @@ class RoomEntryRepository @Inject constructor(
         val now = System.currentTimeMillis()
         val series = database.withTransaction {
             val entry = entryDao.findById(entryId) ?: return@withTransaction null
-            val startsOn = checkNotNull(entry.scheduledDate) {
-                "Add a date before setting a recurrence."
-            }
-            check(endDate == null || !endDate.isBefore(startsOn)) {
-                "The repeat end date must be on or after the first date."
-            }
-            check(entry.recurrenceSeriesId == null) { "This entry is already part of a recurrence series." }
-            val series = RecurrenceSeriesEntity(
-                id = java.util.UUID.randomUUID().toString(),
-                ruleJson = JSONObject()
-                    .put("version", 1)
-                    .put("frequency", frequency.name)
-                    .put("interval", 1)
-                    .toString(),
-                startsOn = startsOn.toEpochDay(),
-                endsOn = endDate?.toEpochDay(),
-                timeZoneId = ZoneId.systemDefault().id,
-                active = true,
-                createdAt = now,
-                updatedAt = now,
-            )
-            recurrenceDao.upsert(series)
-            entryDao.upsert(entry.copy(recurrenceSeriesId = series.id, updatedAt = now))
-            recordActivity(entryId, "Recurrence started", frequency.label, now)
-            series
+            createRecurrenceSeries(entry, frequency, endDate, now)
         } ?: return
         generateOccurrences(series)
+    }
+
+    private suspend fun createRecurrenceSeries(
+        entry: EntryEntity,
+        frequency: RecurrenceFrequency,
+        endDate: LocalDate?,
+        now: Long,
+    ): RecurrenceSeriesEntity {
+        val startsOn = checkNotNull(entry.scheduledDate) {
+            "Add a date before setting a recurrence."
+        }
+        check(endDate == null || !endDate.isBefore(startsOn)) {
+            "The repeat end date must be on or after the first date."
+        }
+        check(entry.recurrenceSeriesId == null) { "This entry is already part of a recurrence series." }
+
+        val series = RecurrenceSeriesEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            ruleJson = JSONObject()
+                .put("version", 1)
+                .put("frequency", frequency.name)
+                .put("interval", 1)
+                .toString(),
+            startsOn = startsOn.toEpochDay(),
+            endsOn = endDate?.toEpochDay(),
+            timeZoneId = ZoneId.systemDefault().id,
+            active = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        recurrenceDao.upsert(series)
+        entryDao.upsert(entry.copy(recurrenceSeriesId = series.id, updatedAt = now))
+        recordActivity(entry.id, "Recurrence started", frequency.label, now)
+        return series
     }
 
     override suspend fun setRecurrenceEndDate(entryId: String, endDate: LocalDate?) {

@@ -280,3 +280,7 @@ Search, structured description blocks, notes, reminders/notifications, recurrenc
 ## 2026-11-18 — Paginated timeline
 
 - Switched the dated timeline to load entries in pages around today, with nearby pages loading as the user scrolls.
+
+## 2026-11-18 — Repeat setup during capture
+
+- Added optional repeat frequency and end-date setup to new-entry capture. The entry and repeat series are saved together before future entries are generated.
